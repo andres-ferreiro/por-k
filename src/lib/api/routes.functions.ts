@@ -62,7 +62,7 @@ export const getRoute = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: route, error } = await context.supabase
       .from("routes")
-      .select("id, branch_id, name, driver_id, is_active, branches(name), profiles!routes_driver_id_fkey(full_name)")
+      .select("id, branch_id, name, driver_id, is_active, branches(name)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -75,13 +75,15 @@ export const getRoute = createServerFn({ method: "POST" })
       .order("position", { ascending: true });
     if (sErr) throw new Error(sErr.message);
 
+    const driverNames = await fetchDriverNames(route.driver_id ? [route.driver_id] : []);
+
     return {
       id: route.id,
       branch_id: route.branch_id,
       branch_name: (route as any).branches?.name ?? null,
       name: route.name,
       driver_id: route.driver_id,
-      driver_name: (route as any).profiles?.full_name ?? null,
+      driver_name: route.driver_id ? driverNames.get(route.driver_id) ?? null : null,
       is_active: route.is_active,
       stops: (stops ?? []).map((s: any) => ({ position: s.position, ...s.customers })),
     };
