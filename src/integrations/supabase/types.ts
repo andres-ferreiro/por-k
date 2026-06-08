@@ -97,6 +97,77 @@ export type Database = {
           },
         ]
       }
+      deliveries: {
+        Row: {
+          branch_id: string
+          comment: string | null
+          created_at: string
+          customer_id: string
+          delivery_date: string
+          driver_id: string
+          id: string
+          photo_url: string | null
+          route_id: string
+          status: Database["public"]["Enums"]["delivery_status"]
+          updated_at: string
+        }
+        Insert: {
+          branch_id: string
+          comment?: string | null
+          created_at?: string
+          customer_id: string
+          delivery_date?: string
+          driver_id: string
+          id?: string
+          photo_url?: string | null
+          route_id: string
+          status?: Database["public"]["Enums"]["delivery_status"]
+          updated_at?: string
+        }
+        Update: {
+          branch_id?: string
+          comment?: string | null
+          created_at?: string
+          customer_id?: string
+          delivery_date?: string
+          driver_id?: string
+          id?: string
+          photo_url?: string | null
+          route_id?: string
+          status?: Database["public"]["Enums"]["delivery_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deliveries_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dispatch_items: {
         Row: {
           created_at: string
@@ -197,6 +268,141 @@ export type Database = {
           },
           {
             foreignKeyName: "dispatches_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expenses: {
+        Row: {
+          amount: number
+          branch_id: string
+          created_at: string
+          description: string
+          driver_id: string
+          expense_date: string
+          id: string
+          photo_url: string | null
+          route_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          branch_id: string
+          created_at?: string
+          description: string
+          driver_id: string
+          expense_date?: string
+          id?: string
+          photo_url?: string | null
+          route_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          branch_id?: string
+          created_at?: string
+          description?: string
+          driver_id?: string
+          expense_date?: string
+          id?: string
+          photo_url?: string | null
+          route_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expenses_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payments: {
+        Row: {
+          amount: number
+          branch_id: string
+          created_at: string
+          customer_id: string
+          driver_id: string
+          id: string
+          method: Database["public"]["Enums"]["payment_method"]
+          note: string | null
+          paid_at: string
+          route_id: string
+          status: Database["public"]["Enums"]["payment_status"]
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          branch_id: string
+          created_at?: string
+          customer_id: string
+          driver_id: string
+          id?: string
+          method?: Database["public"]["Enums"]["payment_method"]
+          note?: string | null
+          paid_at?: string
+          route_id: string
+          status?: Database["public"]["Enums"]["payment_status"]
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          branch_id?: string
+          created_at?: string
+          customer_id?: string
+          driver_id?: string
+          id?: string
+          method?: Database["public"]["Enums"]["payment_method"]
+          note?: string | null
+          paid_at?: string
+          route_id?: string
+          status?: Database["public"]["Enums"]["payment_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_route_id_fkey"
             columns: ["route_id"]
             isOneToOne: false
             referencedRelation: "routes"
@@ -387,6 +593,9 @@ export type Database = {
     }
     Enums: {
       app_role: "owner" | "supervisor" | "cashier" | "driver"
+      delivery_status: "pending" | "delivered" | "failed"
+      payment_method: "cash" | "transfer" | "credit" | "other"
+      payment_status: "paid" | "pending"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -515,6 +724,9 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["owner", "supervisor", "cashier", "driver"],
+      delivery_status: ["pending", "delivered", "failed"],
+      payment_method: ["cash", "transfer", "credit", "other"],
+      payment_status: ["paid", "pending"],
     },
   },
 } as const

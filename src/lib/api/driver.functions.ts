@@ -1,0 +1,375 @@
+import { createServerFn } from "@tanstack/react-start";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { z } from "zod";
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function getMyBranch(supabase: any, userId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("branch_id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data?.branch_id) throw new Error("Tu cuenta no tiene sucursal asignada.");
+  return data.branch_id as string;
+}
+
+// ============ MY ROUTE ============
+
+export const getMyRouteToday = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+
+    // Pick the active route assigned to this driver (most recently updated)
+    const { data: routes, error: rErr } = await supabase
+      .from("routes")
+      .select("id, name, branch_id, branches(name)")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) {
+      return { route: null, customers: [], date: today };
+    }
+
+    const { data: rc, error: rcErr } = await supabase
+      .from("route_customers")
+      .select("position, customer_id, customers(id, name, phone, address, lat, lng)")
+      .eq("route_id", route.id)
+      .order("position", { ascending: true });
+    if (rcErr) throw new Error(rcErr.message);
+
+    const customerIds = (rc ?? []).map((r: any) => r.customer_id);
+    let deliveries: any[] = [];
+    if (customerIds.length > 0) {
+      const { data: del, error: delErr } = await supabase
+        .from("deliveries")
+        .select("id, customer_id, status, comment, photo_url")
+        .eq("route_id", route.id)
+        .eq("delivery_date", today)
+        .in("customer_id", customerIds);
+      if (delErr) throw new Error(delErr.message);
+      deliveries = del ?? [];
+    }
+    const delMap = new Map(deliveries.map((d: any) => [d.customer_id, d]));
+
+    const customers = (rc ?? []).map((r: any) => {
+      const c = r.customers;
+      const d = delMap.get(r.customer_id);
+      return {
+        position: r.position as number,
+        id: c.id as string,
+        name: c.name as string,
+        phone: (c.phone as string | null) ?? null,
+        address: (c.address as string | null) ?? null,
+        lat: c.lat as number | null,
+        lng: c.lng as number | null,
+        delivery: d
+          ? {
+              id: d.id as string,
+              status: d.status as "pending" | "delivered" | "failed",
+              comment: (d.comment as string | null) ?? null,
+              photo_url: (d.photo_url as string | null) ?? null,
+            }
+          : null,
+      };
+    });
+
+    return {
+      date: today,
+      route: {
+        id: route.id as string,
+        name: route.name as string,
+        branch_id: route.branch_id as string,
+        branch_name: route.branches?.name ?? null,
+      },
+      customers,
+    };
+  });
+
+// ============ DELIVERIES ============
+
+const deliveryStatusEnum = z.enum(["pending", "delivered", "failed"]);
+
+const upsertDeliverySchema = z.object({
+  customer_id: z.string().uuid(),
+  status: deliveryStatusEnum,
+  comment: z.string().trim().max(500).nullable().optional(),
+  photo_path: z.string().max(500).nullable().optional(),
+});
+
+export const upsertDelivery = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => upsertDeliverySchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+
+    // Resolve route for this driver
+    const { data: routes, error: rErr } = await supabase
+      .from("routes")
+      .select("id, branch_id")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) throw new Error("No tienes una ruta asignada.");
+
+    // Verify customer belongs to this route
+    const { data: rc, error: rcErr } = await supabase
+      .from("route_customers")
+      .select("customer_id")
+      .eq("route_id", route.id)
+      .eq("customer_id", data.customer_id)
+      .maybeSingle();
+    if (rcErr) throw new Error(rcErr.message);
+    if (!rc) throw new Error("Cliente no pertenece a tu ruta.");
+
+    const { data: row, error } = await supabase
+      .from("deliveries")
+      .upsert(
+        {
+          branch_id: route.branch_id,
+          route_id: route.id,
+          customer_id: data.customer_id,
+          driver_id: userId,
+          delivery_date: today,
+          status: data.status,
+          comment: data.comment ?? null,
+          photo_url: data.photo_path ?? null,
+        },
+        { onConflict: "route_id,customer_id,delivery_date" },
+      )
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const listTodayDeliveries = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+    const { data, error } = await supabase
+      .from("deliveries")
+      .select("id, status, comment, photo_url, customer_id, updated_at, customers(name)")
+      .eq("driver_id", userId)
+      .eq("delivery_date", today)
+      .order("updated_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id as string,
+      status: r.status as "pending" | "delivered" | "failed",
+      comment: r.comment as string | null,
+      photo_url: r.photo_url as string | null,
+      customer_id: r.customer_id as string,
+      customer_name: r.customers?.name ?? null,
+      updated_at: r.updated_at as string,
+    }));
+  });
+
+// ============ PAYMENTS ============
+
+const paymentSchema = z.object({
+  customer_id: z.string().uuid(),
+  amount: z.number().positive().max(10_000_000),
+  status: z.enum(["paid", "pending"]),
+  method: z.enum(["cash", "transfer", "credit", "other"]),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+export const createPayment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => paymentSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: routes, error: rErr } = await supabase
+      .from("routes")
+      .select("id, branch_id")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) throw new Error("No tienes una ruta asignada.");
+
+    const { data: row, error } = await supabase
+      .from("payments")
+      .insert({
+        branch_id: route.branch_id,
+        route_id: route.id,
+        customer_id: data.customer_id,
+        driver_id: userId,
+        amount: data.amount,
+        status: data.status,
+        method: data.method,
+        note: data.note ?? null,
+      })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const deletePayment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.from("payments").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const listTodayPayments = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+    const start = `${today}T00:00:00`;
+    const end = new Date(`${today}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}T00:00:00`;
+    const { data, error } = await supabase
+      .from("payments")
+      .select("id, amount, status, method, note, paid_at, customer_id, customers(name)")
+      .eq("driver_id", userId)
+      .gte("paid_at", start)
+      .lt("paid_at", endStr)
+      .order("paid_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id as string,
+      amount: Number(r.amount),
+      status: r.status as "paid" | "pending",
+      method: r.method as "cash" | "transfer" | "credit" | "other",
+      note: r.note as string | null,
+      paid_at: r.paid_at as string,
+      customer_id: r.customer_id as string,
+      customer_name: r.customers?.name ?? null,
+    }));
+  });
+
+// ============ EXPENSES ============
+
+const expenseSchema = z.object({
+  amount: z.number().positive().max(10_000_000),
+  description: z.string().trim().min(1).max(500),
+  photo_path: z.string().max(500).nullable().optional(),
+});
+
+export const createExpense = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => expenseSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const branchId = await getMyBranch(supabase, userId);
+    const { data: routes } = await supabase
+      .from("routes")
+      .select("id")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    const routeId = (routes ?? [])[0]?.id ?? null;
+
+    const { data: row, error } = await supabase
+      .from("expenses")
+      .insert({
+        branch_id: branchId,
+        route_id: routeId,
+        driver_id: userId,
+        amount: data.amount,
+        description: data.description,
+        photo_url: data.photo_path ?? null,
+      })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const deleteExpense = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.from("expenses").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const listTodayExpenses = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+    const { data, error } = await supabase
+      .from("expenses")
+      .select("id, amount, description, photo_url, expense_date, created_at")
+      .eq("driver_id", userId)
+      .eq("expense_date", today)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id as string,
+      amount: Number(r.amount),
+      description: r.description as string,
+      photo_url: r.photo_url as string | null,
+      created_at: r.created_at as string,
+    }));
+  });
+
+// ============ PHOTOS ============
+
+const photoBucketEnum = z.enum(["delivery-photos", "expense-photos"]);
+
+export const getPhotoUploadUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      bucket: photoBucketEnum,
+      filename: z.string().min(1).max(120),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const ext = (data.filename.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+    const { data: signed, error } = await supabase.storage
+      .from(data.bucket)
+      .createSignedUploadUrl(path);
+    if (error || !signed) throw new Error(error?.message ?? "No se pudo crear URL de carga.");
+    return { path, token: signed.token, signedUrl: signed.signedUrl };
+  });
+
+export const getPhotoViewUrls = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      bucket: photoBucketEnum,
+      paths: z.array(z.string().min(1).max(500)).max(200),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    if (data.paths.length === 0) return {} as Record<string, string>;
+    const { data: signed, error } = await context.supabase.storage
+      .from(data.bucket)
+      .createSignedUrls(data.paths, 3600);
+    if (error) throw new Error(error.message);
+    const map: Record<string, string> = {};
+    for (const s of signed ?? []) {
+      if (s.path && s.signedUrl) map[s.path] = s.signedUrl;
+    }
+    return map;
+  });
