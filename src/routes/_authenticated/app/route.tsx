@@ -99,7 +99,7 @@ function AdminShell() {
           <SidebarContent>
             {NAV.map((group) => {
               const visible = group.items.filter((i) =>
-                ctx.roles.some((r) => i.roles.includes(r)),
+                ctx.roles.some((r: AppRole) => i.roles.includes(r)),
               );
               if (visible.length === 0) return null;
               return (
