@@ -44,6 +44,59 @@ export type Database = {
         }
         Relationships: []
       }
+      customers: {
+        Row: {
+          address: string | null
+          branch_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          lat: number | null
+          lng: number | null
+          name: string
+          notes: string | null
+          phone: string | null
+          photo_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          branch_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          lat?: number | null
+          lng?: number | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          photo_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          branch_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          lat?: number | null
+          lng?: number | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          photo_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customers_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           created_at: string
@@ -105,6 +158,87 @@ export type Database = {
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      route_customers: {
+        Row: {
+          created_at: string
+          customer_id: string
+          position: number
+          route_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          position?: number
+          route_id: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          position?: number
+          route_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "route_customers_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "route_customers_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      routes: {
+        Row: {
+          branch_id: string
+          created_at: string
+          driver_id: string | null
+          id: string
+          is_active: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          branch_id: string
+          created_at?: string
+          driver_id?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          branch_id?: string
+          created_at?: string
+          driver_id?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "routes_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "routes_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
