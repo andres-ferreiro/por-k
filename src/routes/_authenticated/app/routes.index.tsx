@@ -22,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, Pencil, Trash2, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/_authenticated/app/routes")({
+export const Route = createFileRoute("/_authenticated/app/routes/")({
   component: RoutesPage,
 });
 

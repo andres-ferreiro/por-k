@@ -21,7 +21,6 @@ import { Route as AuthenticatedDriverPaymentsRouteImport } from './routes/_authe
 import { Route as AuthenticatedDriverExpensesRouteImport } from './routes/_authenticated/driver/expenses'
 import { Route as AuthenticatedDriverDeliveriesRouteImport } from './routes/_authenticated/driver/deliveries'
 import { Route as AuthenticatedAppUsersRouteImport } from './routes/_authenticated/app/users'
-import { Route as AuthenticatedAppRoutesRouteImport } from './routes/_authenticated/app/routes'
 import { Route as AuthenticatedAppReportsRouteImport } from './routes/_authenticated/app/reports'
 import { Route as AuthenticatedAppProductsRouteImport } from './routes/_authenticated/app/products'
 import { Route as AuthenticatedAppPaymentsRouteImport } from './routes/_authenticated/app/payments'
@@ -30,6 +29,7 @@ import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenti
 import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
 import { Route as AuthenticatedAppCustomersRouteImport } from './routes/_authenticated/app/customers'
 import { Route as AuthenticatedAppBranchesRouteImport } from './routes/_authenticated/app/branches'
+import { Route as AuthenticatedAppRoutesIndexRouteImport } from './routes/_authenticated/app/routes.index'
 import { Route as AuthenticatedAppRoutesRouteIdRouteImport } from './routes/_authenticated/app/routes.$routeId'
 
 const AuthRoute = AuthRouteImport.update({
@@ -96,11 +96,6 @@ const AuthenticatedAppUsersRoute = AuthenticatedAppUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AuthenticatedAppRouteRoute,
 } as any)
-const AuthenticatedAppRoutesRoute = AuthenticatedAppRoutesRouteImport.update({
-  id: '/routes',
-  path: '/routes',
-  getParentRoute: () => AuthenticatedAppRouteRoute,
-} as any)
 const AuthenticatedAppReportsRoute = AuthenticatedAppReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
@@ -148,11 +143,17 @@ const AuthenticatedAppBranchesRoute =
     path: '/branches',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
+const AuthenticatedAppRoutesIndexRoute =
+  AuthenticatedAppRoutesIndexRouteImport.update({
+    id: '/routes/',
+    path: '/routes/',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
 const AuthenticatedAppRoutesRouteIdRoute =
   AuthenticatedAppRoutesRouteIdRouteImport.update({
-    id: '/$routeId',
-    path: '/$routeId',
-    getParentRoute: () => AuthenticatedAppRoutesRoute,
+    id: '/routes/$routeId',
+    path: '/routes/$routeId',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -169,7 +170,6 @@ export interface FileRoutesByFullPath {
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
-  '/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/app/users': typeof AuthenticatedAppUsersRoute
   '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
@@ -177,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AuthenticatedAppIndexRoute
   '/driver/': typeof AuthenticatedDriverIndexRoute
   '/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
+  '/app/routes/': typeof AuthenticatedAppRoutesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -190,7 +191,6 @@ export interface FileRoutesByTo {
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
-  '/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/app/users': typeof AuthenticatedAppUsersRoute
   '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
@@ -198,6 +198,7 @@ export interface FileRoutesByTo {
   '/app': typeof AuthenticatedAppIndexRoute
   '/driver': typeof AuthenticatedDriverIndexRoute
   '/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
+  '/app/routes': typeof AuthenticatedAppRoutesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -215,7 +216,6 @@ export interface FileRoutesById {
   '/_authenticated/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/_authenticated/app/products': typeof AuthenticatedAppProductsRoute
   '/_authenticated/app/reports': typeof AuthenticatedAppReportsRoute
-  '/_authenticated/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/_authenticated/app/users': typeof AuthenticatedAppUsersRoute
   '/_authenticated/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/_authenticated/driver/expenses': typeof AuthenticatedDriverExpensesRoute
@@ -223,6 +223,7 @@ export interface FileRoutesById {
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
   '/_authenticated/driver/': typeof AuthenticatedDriverIndexRoute
   '/_authenticated/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
+  '/_authenticated/app/routes/': typeof AuthenticatedAppRoutesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -240,7 +241,6 @@ export interface FileRouteTypes {
     | '/app/payments'
     | '/app/products'
     | '/app/reports'
-    | '/app/routes'
     | '/app/users'
     | '/driver/deliveries'
     | '/driver/expenses'
@@ -248,6 +248,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/driver/'
     | '/app/routes/$routeId'
+    | '/app/routes/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -261,7 +262,6 @@ export interface FileRouteTypes {
     | '/app/payments'
     | '/app/products'
     | '/app/reports'
-    | '/app/routes'
     | '/app/users'
     | '/driver/deliveries'
     | '/driver/expenses'
@@ -269,6 +269,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/driver'
     | '/app/routes/$routeId'
+    | '/app/routes'
   id:
     | '__root__'
     | '/'
@@ -285,7 +286,6 @@ export interface FileRouteTypes {
     | '/_authenticated/app/payments'
     | '/_authenticated/app/products'
     | '/_authenticated/app/reports'
-    | '/_authenticated/app/routes'
     | '/_authenticated/app/users'
     | '/_authenticated/driver/deliveries'
     | '/_authenticated/driver/expenses'
@@ -293,6 +293,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/'
     | '/_authenticated/driver/'
     | '/_authenticated/app/routes/$routeId'
+    | '/_authenticated/app/routes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -387,13 +388,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppUsersRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
-    '/_authenticated/app/routes': {
-      id: '/_authenticated/app/routes'
-      path: '/routes'
-      fullPath: '/app/routes'
-      preLoaderRoute: typeof AuthenticatedAppRoutesRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
     '/_authenticated/app/reports': {
       id: '/_authenticated/app/reports'
       path: '/reports'
@@ -450,29 +444,22 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppBranchesRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
+    '/_authenticated/app/routes/': {
+      id: '/_authenticated/app/routes/'
+      path: '/routes'
+      fullPath: '/app/routes/'
+      preLoaderRoute: typeof AuthenticatedAppRoutesIndexRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
     '/_authenticated/app/routes/$routeId': {
       id: '/_authenticated/app/routes/$routeId'
-      path: '/$routeId'
+      path: '/routes/$routeId'
       fullPath: '/app/routes/$routeId'
       preLoaderRoute: typeof AuthenticatedAppRoutesRouteIdRouteImport
-      parentRoute: typeof AuthenticatedAppRoutesRoute
+      parentRoute: typeof AuthenticatedAppRouteRoute
     }
   }
 }
-
-interface AuthenticatedAppRoutesRouteChildren {
-  AuthenticatedAppRoutesRouteIdRoute: typeof AuthenticatedAppRoutesRouteIdRoute
-}
-
-const AuthenticatedAppRoutesRouteChildren: AuthenticatedAppRoutesRouteChildren =
-  {
-    AuthenticatedAppRoutesRouteIdRoute: AuthenticatedAppRoutesRouteIdRoute,
-  }
-
-const AuthenticatedAppRoutesRouteWithChildren =
-  AuthenticatedAppRoutesRoute._addFileChildren(
-    AuthenticatedAppRoutesRouteChildren,
-  )
 
 interface AuthenticatedAppRouteRouteChildren {
   AuthenticatedAppBranchesRoute: typeof AuthenticatedAppBranchesRoute
@@ -483,9 +470,10 @@ interface AuthenticatedAppRouteRouteChildren {
   AuthenticatedAppPaymentsRoute: typeof AuthenticatedAppPaymentsRoute
   AuthenticatedAppProductsRoute: typeof AuthenticatedAppProductsRoute
   AuthenticatedAppReportsRoute: typeof AuthenticatedAppReportsRoute
-  AuthenticatedAppRoutesRoute: typeof AuthenticatedAppRoutesRouteWithChildren
   AuthenticatedAppUsersRoute: typeof AuthenticatedAppUsersRoute
   AuthenticatedAppIndexRoute: typeof AuthenticatedAppIndexRoute
+  AuthenticatedAppRoutesRouteIdRoute: typeof AuthenticatedAppRoutesRouteIdRoute
+  AuthenticatedAppRoutesIndexRoute: typeof AuthenticatedAppRoutesIndexRoute
 }
 
 const AuthenticatedAppRouteRouteChildren: AuthenticatedAppRouteRouteChildren = {
@@ -497,9 +485,10 @@ const AuthenticatedAppRouteRouteChildren: AuthenticatedAppRouteRouteChildren = {
   AuthenticatedAppPaymentsRoute: AuthenticatedAppPaymentsRoute,
   AuthenticatedAppProductsRoute: AuthenticatedAppProductsRoute,
   AuthenticatedAppReportsRoute: AuthenticatedAppReportsRoute,
-  AuthenticatedAppRoutesRoute: AuthenticatedAppRoutesRouteWithChildren,
   AuthenticatedAppUsersRoute: AuthenticatedAppUsersRoute,
   AuthenticatedAppIndexRoute: AuthenticatedAppIndexRoute,
+  AuthenticatedAppRoutesRouteIdRoute: AuthenticatedAppRoutesRouteIdRoute,
+  AuthenticatedAppRoutesIndexRoute: AuthenticatedAppRoutesIndexRoute,
 }
 
 const AuthenticatedAppRouteRouteWithChildren =
@@ -551,3 +540,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
