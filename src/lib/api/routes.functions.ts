@@ -25,21 +25,32 @@ async function resolveBranchId(
   return branchId;
 }
 
+async function fetchDriverNames(ids: string[]): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length === 0) return map;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.from("profiles").select("id, full_name").in("id", unique);
+  for (const r of data ?? []) map.set(r.id, r.full_name);
+  return map;
+}
+
 export const listRoutes = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("routes")
-      .select("id, branch_id, name, driver_id, is_active, branches(name), profiles!routes_driver_id_fkey(full_name), route_customers(count)")
+      .select("id, branch_id, name, driver_id, is_active, branches(name), route_customers(count)")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
+    const driverNames = await fetchDriverNames((data ?? []).map((r: any) => r.driver_id).filter(Boolean));
     return (data ?? []).map((r: any) => ({
       id: r.id,
       branch_id: r.branch_id,
       branch_name: r.branches?.name ?? null,
       name: r.name,
       driver_id: r.driver_id,
-      driver_name: r.profiles?.full_name ?? null,
+      driver_name: r.driver_id ? driverNames.get(r.driver_id) ?? null : null,
       is_active: r.is_active,
       customer_count: r.route_customers?.[0]?.count ?? 0,
     }));
