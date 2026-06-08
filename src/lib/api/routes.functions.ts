@@ -174,12 +174,20 @@ export const listBranchDrivers = createServerFn({ method: "POST" })
     if (!targetBranch) return [] as { id: string; full_name: string | null }[];
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: driverRoles, error: rolesErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "driver");
+    if (rolesErr) throw new Error(rolesErr.message);
+    const driverIds = (driverRoles ?? []).map((r: any) => r.user_id);
+    if (driverIds.length === 0) return [] as { id: string; full_name: string | null }[];
+
     const { data: rows, error } = await supabaseAdmin
       .from("profiles")
-      .select("id, full_name, user_roles!inner(role)")
+      .select("id, full_name")
       .eq("branch_id", targetBranch)
       .eq("is_active", true)
-      .eq("user_roles.role", "driver");
+      .in("id", driverIds);
     if (error) throw new Error(error.message);
     return (rows ?? []).map((r: any) => ({ id: r.id, full_name: r.full_name }));
   });
