@@ -100,12 +100,7 @@ export const deleteCustomer = createServerFn({ method: "POST" })
     const { error } = await context.supabase.from("customers").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     if (cust?.photo_url) {
-      const marker = "/customer-photos/";
-      const idx = cust.photo_url.indexOf(marker);
-      if (idx >= 0) {
-        const path = cust.photo_url.slice(idx + marker.length).split("?")[0];
-        await context.supabase.storage.from("customer-photos").remove([path]).catch(() => {});
-      }
+      await context.supabase.storage.from("customer-photos").remove([cust.photo_url]).catch(() => {});
     }
     return { ok: true };
   });

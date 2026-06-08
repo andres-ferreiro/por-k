@@ -30,6 +30,7 @@ import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenti
 import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
 import { Route as AuthenticatedAppCustomersRouteImport } from './routes/_authenticated/app/customers'
 import { Route as AuthenticatedAppBranchesRouteImport } from './routes/_authenticated/app/branches'
+import { Route as AuthenticatedAppRoutesRouteIdRouteImport } from './routes/_authenticated/app/routes.$routeId'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -147,6 +148,12 @@ const AuthenticatedAppBranchesRoute =
     path: '/branches',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
+const AuthenticatedAppRoutesRouteIdRoute =
+  AuthenticatedAppRoutesRouteIdRouteImport.update({
+    id: '/$routeId',
+    path: '/$routeId',
+    getParentRoute: () => AuthenticatedAppRoutesRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -162,13 +169,14 @@ export interface FileRoutesByFullPath {
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
-  '/app/routes': typeof AuthenticatedAppRoutesRoute
+  '/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/app/users': typeof AuthenticatedAppUsersRoute
   '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
   '/driver/payments': typeof AuthenticatedDriverPaymentsRoute
   '/app/': typeof AuthenticatedAppIndexRoute
   '/driver/': typeof AuthenticatedDriverIndexRoute
+  '/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -182,13 +190,14 @@ export interface FileRoutesByTo {
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
-  '/app/routes': typeof AuthenticatedAppRoutesRoute
+  '/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/app/users': typeof AuthenticatedAppUsersRoute
   '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
   '/driver/payments': typeof AuthenticatedDriverPaymentsRoute
   '/app': typeof AuthenticatedAppIndexRoute
   '/driver': typeof AuthenticatedDriverIndexRoute
+  '/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -206,13 +215,14 @@ export interface FileRoutesById {
   '/_authenticated/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/_authenticated/app/products': typeof AuthenticatedAppProductsRoute
   '/_authenticated/app/reports': typeof AuthenticatedAppReportsRoute
-  '/_authenticated/app/routes': typeof AuthenticatedAppRoutesRoute
+  '/_authenticated/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/_authenticated/app/users': typeof AuthenticatedAppUsersRoute
   '/_authenticated/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/_authenticated/driver/expenses': typeof AuthenticatedDriverExpensesRoute
   '/_authenticated/driver/payments': typeof AuthenticatedDriverPaymentsRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
   '/_authenticated/driver/': typeof AuthenticatedDriverIndexRoute
+  '/_authenticated/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/driver/payments'
     | '/app/'
     | '/driver/'
+    | '/app/routes/$routeId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -257,6 +268,7 @@ export interface FileRouteTypes {
     | '/driver/payments'
     | '/app'
     | '/driver'
+    | '/app/routes/$routeId'
   id:
     | '__root__'
     | '/'
@@ -280,6 +292,7 @@ export interface FileRouteTypes {
     | '/_authenticated/driver/payments'
     | '/_authenticated/app/'
     | '/_authenticated/driver/'
+    | '/_authenticated/app/routes/$routeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -437,8 +450,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppBranchesRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
+    '/_authenticated/app/routes/$routeId': {
+      id: '/_authenticated/app/routes/$routeId'
+      path: '/$routeId'
+      fullPath: '/app/routes/$routeId'
+      preLoaderRoute: typeof AuthenticatedAppRoutesRouteIdRouteImport
+      parentRoute: typeof AuthenticatedAppRoutesRoute
+    }
   }
 }
+
+interface AuthenticatedAppRoutesRouteChildren {
+  AuthenticatedAppRoutesRouteIdRoute: typeof AuthenticatedAppRoutesRouteIdRoute
+}
+
+const AuthenticatedAppRoutesRouteChildren: AuthenticatedAppRoutesRouteChildren =
+  {
+    AuthenticatedAppRoutesRouteIdRoute: AuthenticatedAppRoutesRouteIdRoute,
+  }
+
+const AuthenticatedAppRoutesRouteWithChildren =
+  AuthenticatedAppRoutesRoute._addFileChildren(
+    AuthenticatedAppRoutesRouteChildren,
+  )
 
 interface AuthenticatedAppRouteRouteChildren {
   AuthenticatedAppBranchesRoute: typeof AuthenticatedAppBranchesRoute
@@ -449,7 +483,7 @@ interface AuthenticatedAppRouteRouteChildren {
   AuthenticatedAppPaymentsRoute: typeof AuthenticatedAppPaymentsRoute
   AuthenticatedAppProductsRoute: typeof AuthenticatedAppProductsRoute
   AuthenticatedAppReportsRoute: typeof AuthenticatedAppReportsRoute
-  AuthenticatedAppRoutesRoute: typeof AuthenticatedAppRoutesRoute
+  AuthenticatedAppRoutesRoute: typeof AuthenticatedAppRoutesRouteWithChildren
   AuthenticatedAppUsersRoute: typeof AuthenticatedAppUsersRoute
   AuthenticatedAppIndexRoute: typeof AuthenticatedAppIndexRoute
 }
@@ -463,7 +497,7 @@ const AuthenticatedAppRouteRouteChildren: AuthenticatedAppRouteRouteChildren = {
   AuthenticatedAppPaymentsRoute: AuthenticatedAppPaymentsRoute,
   AuthenticatedAppProductsRoute: AuthenticatedAppProductsRoute,
   AuthenticatedAppReportsRoute: AuthenticatedAppReportsRoute,
-  AuthenticatedAppRoutesRoute: AuthenticatedAppRoutesRoute,
+  AuthenticatedAppRoutesRoute: AuthenticatedAppRoutesRouteWithChildren,
   AuthenticatedAppUsersRoute: AuthenticatedAppUsersRoute,
   AuthenticatedAppIndexRoute: AuthenticatedAppIndexRoute,
 }
