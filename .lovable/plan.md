@@ -1,74 +1,84 @@
+# Driver Mobile Experience (PWA)
 
-# Despachos — v1 (cashier)
+Build a fast, phone-first experience for the driver role, installable from the browser. Reuses the existing `/driver` shell (bottom-tab nav, max-w-md, already gated by role).
 
-Permitir al cajero registrar el despacho de producto que sale con un repartidor por ruta, y ver un resumen diario simple de los despachos de su sucursal. Sin devoluciones todavía.
+## What the driver gets
 
-## Base de datos (una migración)
+### 1. "Mi ruta" (`/driver`)
+- Header: today's date + assigned route name + branch.
+- Big card showing route progress: `X / N entregadas` with a progress bar.
+- Ordered list of customers (by `route_customers.position`), each as a tappable card showing:
+  - Name, phone (tap to call), address.
+  - Status badge: pendiente / entregado / fallido (color-coded).
+  - "Ubicación" link → opens Google Maps with `lat,lng` (or address fallback).
+  - Quick action buttons: **Entregar**, **Pago**, **Gasto** (the last opens the expenses tab pre-filled with today).
+- Empty state when driver has no route assigned.
 
-Dos tablas nuevas en `public`, ambas con `branch_id`, RLS, GRANTs y trigger `updated_at`:
+### 2. Entrega (delivery) flow
+Triggered from a customer card → opens a bottom sheet (`Drawer`):
+- Status: Entregado (default) / Pendiente / Fallido — large segmented buttons.
+- Comentario (textarea, optional).
+- Foto de evidencia (optional): one-tap camera button using `<input type="file" accept="image/*" capture="environment">`. Preview thumbnail + remove. Uploaded to a new private `delivery-photos` bucket at `{driver_id}/{delivery_id}.jpg`.
+- Guardar → upserts on `(route_id, customer_id, delivery_date)`; closes sheet, customer card reflects new status, progress bar updates.
 
-- `dispatches`
-  - `id`, `branch_id` (FK branches, NOT NULL), `route_id` (FK routes, NOT NULL), `driver_id` (FK profiles, NOT NULL), `dispatched_by` (FK profiles = cajero), `dispatched_at timestamptz default now()`, `notes text`, timestamps.
-  - Índices por `(branch_id, dispatched_at desc)` y `(route_id)`.
-- `dispatch_items`
-  - `id`, `dispatch_id` (FK dispatches ON DELETE CASCADE), `product_id` (FK products), `quantity numeric NOT NULL CHECK (quantity > 0)`, timestamps.
-  - Unique (`dispatch_id`, `product_id`) para evitar líneas duplicadas del mismo producto.
+### 3. Pago (`/driver/payments`)
+- Sheet flow opened from a customer card OR a "+" FAB on the payments tab (select customer from route list).
+- Fields: monto (number), estado (Pagado default / Pendiente), método radio (**Efectivo** preselected, Transferencia, Crédito, Otro), nota (optional).
+- Payments tab body: today's totals (por método) + list of today's payments grouped by customer with edit/delete.
 
-**RLS** (helpers existentes `current_branch_id()` + `has_role`):
-- owner: acceso total.
-- supervisor y cashier: ven y crean filas con `branch_id = current_branch_id()`. Cashier además puede editar/borrar despachos de su sucursal del **día actual** (regla en server fn, no en RLS, para mantener policies simples — RLS permite update/delete por branch).
-- driver: solo SELECT de despachos donde `driver_id = auth.uid()` (lectura para futura UI del repartidor).
-- `dispatch_items`: gating vía `EXISTS (select 1 from dispatches where id = dispatch_id and <misma regla branch/role>)`.
+### 4. Gasto (`/driver/expenses`)
+- "+" FAB opens sheet with: monto, descripción, foto del recibo (same camera input pattern, uploaded to `expense-photos` bucket).
+- Tab body: today's total + list of today's expenses with thumbnail.
 
-## Server functions (`src/lib/api/dispatches.functions.ts`)
+### 5. Entregas tab (`/driver/deliveries`)
+- Today's deliveries grouped by status with counters. Tap any row to re-open its sheet to edit.
 
-Todas con `requireSupabaseAuth` y cliente RLS-aware:
+## Installable PWA (manifest-only)
+- Add `public/manifest.webmanifest` with name, short_name, theme_color matching primary, `display: "standalone"`, `start_url: "/driver"`, icons.
+- Generate two app icons (192, 512) in `public/`.
+- Add `<link rel="manifest">`, `<meta name="theme-color">`, `<link rel="apple-touch-icon">` in `__root.tsx` head.
+- No service worker (no offline requested) — follows the PWA-minimum guidance.
 
-- `listRoutesForDispatch()` — rutas activas de la sucursal del usuario con su driver asignado (para precargar el repartidor al elegir ruta).
-- `listProductsActive()` — productos activos (id, name, unit).
-- `createDispatch({ route_id, driver_id, notes?, items: [{ product_id, quantity }] })` — valida con zod (cantidad > 0, items.length ≥ 1, sin productos repetidos), resuelve `branch_id` desde `current_branch_id`, inserta `dispatches` + `dispatch_items` en orden, devuelve `{ id }`.
-- `listDispatchesToday({ date? })` — lista despachos de la sucursal para una fecha (default = hoy en zona local del servidor → usar rango `[date 00:00, date+1 00:00)`); incluye ruta, repartidor, cajero, total de líneas y suma de cantidades.
-- `getDispatch({ id })` — encabezado + items con nombre/unit del producto. (Para detalle y futura edición.)
+## Technical details
 
-Validación zod estricta en el inputValidator (longitudes, uuid, cantidades).
+### New tables (migration)
+- `deliveries`: `id`, `branch_id`, `route_id`, `customer_id`, `driver_id`, `delivery_date date`, `status` (enum `delivery_status`: pending|delivered|failed), `comment`, `photo_url`, timestamps. Unique `(route_id, customer_id, delivery_date)`.
+- `payments`: `id`, `branch_id`, `route_id`, `customer_id`, `driver_id`, `amount numeric`, `status` (paid|pending), `method` (cash|transfer|credit|other), `note`, `paid_at`, timestamps.
+- `expenses`: `id`, `branch_id`, `route_id` (nullable), `driver_id`, `amount numeric`, `description`, `photo_url`, `expense_date date`, timestamps.
 
-## UI
+All tables: `ENABLE RLS`, `GRANT` to `authenticated` + `service_role`. Policies:
+- Driver can insert/select/update own rows (`driver_id = auth.uid()`).
+- Branch staff (cashier/supervisor) and owner can view rows in their branch via `current_branch_id()`.
 
-Reemplazar el placeholder en `src/routes/_authenticated/app/dispatch.tsx`. Layout en dos columnas en desktop, apilado en mobile:
+### Storage buckets
+- `delivery-photos` (private), `expense-photos` (private). RLS on `storage.objects`:
+  - Driver can insert/select objects under path prefix `{auth.uid()}/...`.
+  - Branch staff can select for their branch (via joined row lookup — simplified to "authenticated of same branch can read all" via a helper, or keep driver-scoped only and signed-URL the photo through a server fn). Simpler: driver-only RW; reads for other roles go through `getDeliveryPhotoUrl` server fn using `supabaseAdmin` + signed URL.
 
-### Panel izquierdo — Nuevo despacho
-- Select **Ruta** (rutas activas de la sucursal).
-- Select **Repartidor** — autocompletado con el `driver_id` de la ruta seleccionada; editable por si la ruta no tiene driver asignado (lista de drivers de la sucursal vía `listBranchDrivers` ya existente).
-- Tabla de líneas de producto:
-  - Cada fila: select de producto + input numérico (cantidad, con unidad mostrada) + botón eliminar.
-  - Botón "+ Agregar producto" añade fila vacía.
-  - El select filtra productos ya elegidos para evitar duplicados.
-- Campo notas opcional.
-- Botón **Registrar despacho** → llama `createDispatch`, limpia el formulario, hace toast y refresca el resumen.
+### Server functions (`src/lib/api/driver.functions.ts`)
+- `getMyRouteToday()` → route + ordered customers + today's delivery status map.
+- `upsertDelivery({ customer_id, status, comment, photo_path? })`.
+- `listTodayDeliveries()` / `listTodayPayments()` / `listTodayExpenses()`.
+- `createPayment({...})`, `createExpense({...})`.
+- `getSignedPhotoUrl({ bucket, path })` (for re-display in edit sheet).
+- All use `requireSupabaseAuth`; resolve `branch_id` from `profiles`.
 
-### Panel derecho — Resumen del día
-- Selector de fecha (default hoy) — input `<input type="date">`.
-- Card con totales: # despachos, # rutas distintas, suma total de unidades.
-- Lista de despachos del día (orden desc por `dispatched_at`): hora, ruta, repartidor, # líneas, total de unidades, botón "ver" que abre un dialog con el detalle (items y notas) via `getDispatch`.
+### UI files
+- Rewrite `src/routes/_authenticated/driver/index.tsx` (Mi ruta).
+- Rewrite `src/routes/_authenticated/driver/deliveries.tsx`, `payments.tsx`, `expenses.tsx`.
+- New shared sheets: `src/components/driver/delivery-sheet.tsx`, `payment-sheet.tsx`, `expense-sheet.tsx`, `photo-capture.tsx`.
+- Use `vaul` `Drawer` (already installed) for bottom sheets; `Input`, `Textarea`, `RadioGroup`, `Badge`, `Button`.
 
-### Acceso
-- La ruta `/app/dispatch` ya está dentro de `_authenticated/app`. Si el usuario no es cashier/supervisor/owner, mostrar mensaje "Sin acceso" (no redirige; coherente con el resto del app shell).
+### Order of work
+1. Migration (tables, enums, RLS, grants).
+2. Storage buckets (tool call) + storage RLS policies.
+3. Server functions.
+4. PWA manifest + icons + head tags.
+5. UI: Mi ruta + delivery sheet → payments → expenses → deliveries tab.
+6. Manual verification with a driver account.
 
-## Aislamiento por sucursal
-
-- RLS hace el trabajo. Server fns nunca aceptan `branch_id` del cliente: siempre usan `current_branch_id()`.
-- Cashier no puede registrar despachos en otra sucursal aunque manipule la red.
-
-## Fuera de alcance
-
-- Devoluciones (siguiente iteración).
-- Edición/eliminación de despachos desde la UI (el server fn la permitirá pero el botón se añade luego).
-- Stock / inventario.
-- Pagos y entregas.
-
-## Orden de implementación
-
-1. Migración (tablas + RLS + GRANTs + triggers).
-2. `dispatches.functions.ts` con las cinco fns y validación zod.
-3. UI `/app/dispatch` (formulario + resumen + dialog de detalle).
-4. Verificación manual con usuario cashier: crear despacho, ver resumen, confirmar aislamiento.
+## Out of scope
+- Offline mode / service worker (only manifest installability).
+- Returns, inventory adjustments.
+- Push notifications.
+- Editing past-day records (only today is mutable from driver UI).
