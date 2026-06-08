@@ -30,6 +30,7 @@ import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenti
 import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
 import { Route as AuthenticatedAppCustomersRouteImport } from './routes/_authenticated/app/customers'
 import { Route as AuthenticatedAppBranchesRouteImport } from './routes/_authenticated/app/branches'
+import { Route as AuthenticatedAppRoutesIndexRouteImport } from './routes/_authenticated/app/routes.index'
 import { Route as AuthenticatedAppRoutesRouteIdRouteImport } from './routes/_authenticated/app/routes.$routeId'
 
 const AuthRoute = AuthRouteImport.update({
@@ -148,6 +149,12 @@ const AuthenticatedAppBranchesRoute =
     path: '/branches',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
+const AuthenticatedAppRoutesIndexRoute =
+  AuthenticatedAppRoutesIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedAppRoutesRoute,
+  } as any)
 const AuthenticatedAppRoutesRouteIdRoute =
   AuthenticatedAppRoutesRouteIdRouteImport.update({
     id: '/$routeId',
@@ -177,6 +184,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AuthenticatedAppIndexRoute
   '/driver/': typeof AuthenticatedDriverIndexRoute
   '/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
+  '/app/routes/': typeof AuthenticatedAppRoutesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -190,7 +198,6 @@ export interface FileRoutesByTo {
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
-  '/app/routes': typeof AuthenticatedAppRoutesRouteWithChildren
   '/app/users': typeof AuthenticatedAppUsersRoute
   '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
   '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
@@ -198,6 +205,7 @@ export interface FileRoutesByTo {
   '/app': typeof AuthenticatedAppIndexRoute
   '/driver': typeof AuthenticatedDriverIndexRoute
   '/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
+  '/app/routes': typeof AuthenticatedAppRoutesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -223,6 +231,7 @@ export interface FileRoutesById {
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
   '/_authenticated/driver/': typeof AuthenticatedDriverIndexRoute
   '/_authenticated/app/routes/$routeId': typeof AuthenticatedAppRoutesRouteIdRoute
+  '/_authenticated/app/routes/': typeof AuthenticatedAppRoutesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -248,6 +257,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/driver/'
     | '/app/routes/$routeId'
+    | '/app/routes/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -261,7 +271,6 @@ export interface FileRouteTypes {
     | '/app/payments'
     | '/app/products'
     | '/app/reports'
-    | '/app/routes'
     | '/app/users'
     | '/driver/deliveries'
     | '/driver/expenses'
@@ -269,6 +278,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/driver'
     | '/app/routes/$routeId'
+    | '/app/routes'
   id:
     | '__root__'
     | '/'
@@ -293,6 +303,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/'
     | '/_authenticated/driver/'
     | '/_authenticated/app/routes/$routeId'
+    | '/_authenticated/app/routes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -450,6 +461,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppBranchesRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
+    '/_authenticated/app/routes/': {
+      id: '/_authenticated/app/routes/'
+      path: '/'
+      fullPath: '/app/routes/'
+      preLoaderRoute: typeof AuthenticatedAppRoutesIndexRouteImport
+      parentRoute: typeof AuthenticatedAppRoutesRoute
+    }
     '/_authenticated/app/routes/$routeId': {
       id: '/_authenticated/app/routes/$routeId'
       path: '/$routeId'
@@ -462,11 +480,13 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedAppRoutesRouteChildren {
   AuthenticatedAppRoutesRouteIdRoute: typeof AuthenticatedAppRoutesRouteIdRoute
+  AuthenticatedAppRoutesIndexRoute: typeof AuthenticatedAppRoutesIndexRoute
 }
 
 const AuthenticatedAppRoutesRouteChildren: AuthenticatedAppRoutesRouteChildren =
   {
     AuthenticatedAppRoutesRouteIdRoute: AuthenticatedAppRoutesRouteIdRoute,
+    AuthenticatedAppRoutesIndexRoute: AuthenticatedAppRoutesIndexRoute,
   }
 
 const AuthenticatedAppRoutesRouteWithChildren =
