@@ -9,38 +9,301 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedPostLoginRouteImport } from './routes/_authenticated/post-login'
+import { Route as AuthenticatedDriverRouteRouteImport } from './routes/_authenticated/driver/route'
+import { Route as AuthenticatedAppRouteRouteImport } from './routes/_authenticated/app/route'
+import { Route as AuthenticatedDriverIndexRouteImport } from './routes/_authenticated/driver/index'
+import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app/index'
+import { Route as AuthenticatedDriverPaymentsRouteImport } from './routes/_authenticated/driver/payments'
+import { Route as AuthenticatedDriverExpensesRouteImport } from './routes/_authenticated/driver/expenses'
+import { Route as AuthenticatedDriverDeliveriesRouteImport } from './routes/_authenticated/driver/deliveries'
+import { Route as AuthenticatedAppUsersRouteImport } from './routes/_authenticated/app/users'
+import { Route as AuthenticatedAppRoutesRouteImport } from './routes/_authenticated/app/routes'
+import { Route as AuthenticatedAppReportsRouteImport } from './routes/_authenticated/app/reports'
+import { Route as AuthenticatedAppProductsRouteImport } from './routes/_authenticated/app/products'
+import { Route as AuthenticatedAppPaymentsRouteImport } from './routes/_authenticated/app/payments'
+import { Route as AuthenticatedAppExpensesRouteImport } from './routes/_authenticated/app/expenses'
+import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenticated/app/dispatch'
+import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
+import { Route as AuthenticatedAppCustomersRouteImport } from './routes/_authenticated/app/customers'
+import { Route as AuthenticatedAppBranchesRouteImport } from './routes/_authenticated/app/branches'
 
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedPostLoginRoute = AuthenticatedPostLoginRouteImport.update({
+  id: '/post-login',
+  path: '/post-login',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDriverRouteRoute =
+  AuthenticatedDriverRouteRouteImport.update({
+    id: '/driver',
+    path: '/driver',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAppRouteRoute = AuthenticatedAppRouteRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDriverIndexRoute =
+  AuthenticatedDriverIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedAppIndexRoute = AuthenticatedAppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedDriverPaymentsRoute =
+  AuthenticatedDriverPaymentsRouteImport.update({
+    id: '/payments',
+    path: '/payments',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedDriverExpensesRoute =
+  AuthenticatedDriverExpensesRouteImport.update({
+    id: '/expenses',
+    path: '/expenses',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedDriverDeliveriesRoute =
+  AuthenticatedDriverDeliveriesRouteImport.update({
+    id: '/deliveries',
+    path: '/deliveries',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedAppUsersRoute = AuthenticatedAppUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedAppRoutesRoute = AuthenticatedAppRoutesRouteImport.update({
+  id: '/routes',
+  path: '/routes',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedAppReportsRoute = AuthenticatedAppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedAppProductsRoute =
+  AuthenticatedAppProductsRouteImport.update({
+    id: '/products',
+    path: '/products',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppPaymentsRoute =
+  AuthenticatedAppPaymentsRouteImport.update({
+    id: '/payments',
+    path: '/payments',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppExpensesRoute =
+  AuthenticatedAppExpensesRouteImport.update({
+    id: '/expenses',
+    path: '/expenses',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppDispatchRoute =
+  AuthenticatedAppDispatchRouteImport.update({
+    id: '/dispatch',
+    path: '/dispatch',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppDeliveriesRoute =
+  AuthenticatedAppDeliveriesRouteImport.update({
+    id: '/deliveries',
+    path: '/deliveries',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppCustomersRoute =
+  AuthenticatedAppCustomersRouteImport.update({
+    id: '/customers',
+    path: '/customers',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppBranchesRoute =
+  AuthenticatedAppBranchesRouteImport.update({
+    id: '/branches',
+    path: '/branches',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/app': typeof AuthenticatedAppRouteRouteWithChildren
+  '/driver': typeof AuthenticatedDriverRouteRouteWithChildren
+  '/post-login': typeof AuthenticatedPostLoginRoute
+  '/app/branches': typeof AuthenticatedAppBranchesRoute
+  '/app/customers': typeof AuthenticatedAppCustomersRoute
+  '/app/deliveries': typeof AuthenticatedAppDeliveriesRoute
+  '/app/dispatch': typeof AuthenticatedAppDispatchRoute
+  '/app/expenses': typeof AuthenticatedAppExpensesRoute
+  '/app/payments': typeof AuthenticatedAppPaymentsRoute
+  '/app/products': typeof AuthenticatedAppProductsRoute
+  '/app/reports': typeof AuthenticatedAppReportsRoute
+  '/app/routes': typeof AuthenticatedAppRoutesRoute
+  '/app/users': typeof AuthenticatedAppUsersRoute
+  '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
+  '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
+  '/driver/payments': typeof AuthenticatedDriverPaymentsRoute
+  '/app/': typeof AuthenticatedAppIndexRoute
+  '/driver/': typeof AuthenticatedDriverIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/post-login': typeof AuthenticatedPostLoginRoute
+  '/app/branches': typeof AuthenticatedAppBranchesRoute
+  '/app/customers': typeof AuthenticatedAppCustomersRoute
+  '/app/deliveries': typeof AuthenticatedAppDeliveriesRoute
+  '/app/dispatch': typeof AuthenticatedAppDispatchRoute
+  '/app/expenses': typeof AuthenticatedAppExpensesRoute
+  '/app/payments': typeof AuthenticatedAppPaymentsRoute
+  '/app/products': typeof AuthenticatedAppProductsRoute
+  '/app/reports': typeof AuthenticatedAppReportsRoute
+  '/app/routes': typeof AuthenticatedAppRoutesRoute
+  '/app/users': typeof AuthenticatedAppUsersRoute
+  '/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
+  '/driver/expenses': typeof AuthenticatedDriverExpensesRoute
+  '/driver/payments': typeof AuthenticatedDriverPaymentsRoute
+  '/app': typeof AuthenticatedAppIndexRoute
+  '/driver': typeof AuthenticatedDriverIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/auth': typeof AuthRoute
+  '/_authenticated/app': typeof AuthenticatedAppRouteRouteWithChildren
+  '/_authenticated/driver': typeof AuthenticatedDriverRouteRouteWithChildren
+  '/_authenticated/post-login': typeof AuthenticatedPostLoginRoute
+  '/_authenticated/app/branches': typeof AuthenticatedAppBranchesRoute
+  '/_authenticated/app/customers': typeof AuthenticatedAppCustomersRoute
+  '/_authenticated/app/deliveries': typeof AuthenticatedAppDeliveriesRoute
+  '/_authenticated/app/dispatch': typeof AuthenticatedAppDispatchRoute
+  '/_authenticated/app/expenses': typeof AuthenticatedAppExpensesRoute
+  '/_authenticated/app/payments': typeof AuthenticatedAppPaymentsRoute
+  '/_authenticated/app/products': typeof AuthenticatedAppProductsRoute
+  '/_authenticated/app/reports': typeof AuthenticatedAppReportsRoute
+  '/_authenticated/app/routes': typeof AuthenticatedAppRoutesRoute
+  '/_authenticated/app/users': typeof AuthenticatedAppUsersRoute
+  '/_authenticated/driver/deliveries': typeof AuthenticatedDriverDeliveriesRoute
+  '/_authenticated/driver/expenses': typeof AuthenticatedDriverExpensesRoute
+  '/_authenticated/driver/payments': typeof AuthenticatedDriverPaymentsRoute
+  '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
+  '/_authenticated/driver/': typeof AuthenticatedDriverIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/app'
+    | '/driver'
+    | '/post-login'
+    | '/app/branches'
+    | '/app/customers'
+    | '/app/deliveries'
+    | '/app/dispatch'
+    | '/app/expenses'
+    | '/app/payments'
+    | '/app/products'
+    | '/app/reports'
+    | '/app/routes'
+    | '/app/users'
+    | '/driver/deliveries'
+    | '/driver/expenses'
+    | '/driver/payments'
+    | '/app/'
+    | '/driver/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/auth'
+    | '/post-login'
+    | '/app/branches'
+    | '/app/customers'
+    | '/app/deliveries'
+    | '/app/dispatch'
+    | '/app/expenses'
+    | '/app/payments'
+    | '/app/products'
+    | '/app/reports'
+    | '/app/routes'
+    | '/app/users'
+    | '/driver/deliveries'
+    | '/driver/expenses'
+    | '/driver/payments'
+    | '/app'
+    | '/driver'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/app'
+    | '/_authenticated/driver'
+    | '/_authenticated/post-login'
+    | '/_authenticated/app/branches'
+    | '/_authenticated/app/customers'
+    | '/_authenticated/app/deliveries'
+    | '/_authenticated/app/dispatch'
+    | '/_authenticated/app/expenses'
+    | '/_authenticated/app/payments'
+    | '/_authenticated/app/products'
+    | '/_authenticated/app/reports'
+    | '/_authenticated/app/routes'
+    | '/_authenticated/app/users'
+    | '/_authenticated/driver/deliveries'
+    | '/_authenticated/driver/expenses'
+    | '/_authenticated/driver/payments'
+    | '/_authenticated/app/'
+    | '/_authenticated/driver/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AuthRoute: typeof AuthRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,22 +311,208 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/post-login': {
+      id: '/_authenticated/post-login'
+      path: '/post-login'
+      fullPath: '/post-login'
+      preLoaderRoute: typeof AuthenticatedPostLoginRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/driver': {
+      id: '/_authenticated/driver'
+      path: '/driver'
+      fullPath: '/driver'
+      preLoaderRoute: typeof AuthenticatedDriverRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/app': {
+      id: '/_authenticated/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AuthenticatedAppRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/driver/': {
+      id: '/_authenticated/driver/'
+      path: '/'
+      fullPath: '/driver/'
+      preLoaderRoute: typeof AuthenticatedDriverIndexRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/app/': {
+      id: '/_authenticated/app/'
+      path: '/'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AuthenticatedAppIndexRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/driver/payments': {
+      id: '/_authenticated/driver/payments'
+      path: '/payments'
+      fullPath: '/driver/payments'
+      preLoaderRoute: typeof AuthenticatedDriverPaymentsRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/driver/expenses': {
+      id: '/_authenticated/driver/expenses'
+      path: '/expenses'
+      fullPath: '/driver/expenses'
+      preLoaderRoute: typeof AuthenticatedDriverExpensesRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/driver/deliveries': {
+      id: '/_authenticated/driver/deliveries'
+      path: '/deliveries'
+      fullPath: '/driver/deliveries'
+      preLoaderRoute: typeof AuthenticatedDriverDeliveriesRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/app/users': {
+      id: '/_authenticated/app/users'
+      path: '/users'
+      fullPath: '/app/users'
+      preLoaderRoute: typeof AuthenticatedAppUsersRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/routes': {
+      id: '/_authenticated/app/routes'
+      path: '/routes'
+      fullPath: '/app/routes'
+      preLoaderRoute: typeof AuthenticatedAppRoutesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/reports': {
+      id: '/_authenticated/app/reports'
+      path: '/reports'
+      fullPath: '/app/reports'
+      preLoaderRoute: typeof AuthenticatedAppReportsRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/products': {
+      id: '/_authenticated/app/products'
+      path: '/products'
+      fullPath: '/app/products'
+      preLoaderRoute: typeof AuthenticatedAppProductsRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/payments': {
+      id: '/_authenticated/app/payments'
+      path: '/payments'
+      fullPath: '/app/payments'
+      preLoaderRoute: typeof AuthenticatedAppPaymentsRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/expenses': {
+      id: '/_authenticated/app/expenses'
+      path: '/expenses'
+      fullPath: '/app/expenses'
+      preLoaderRoute: typeof AuthenticatedAppExpensesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/dispatch': {
+      id: '/_authenticated/app/dispatch'
+      path: '/dispatch'
+      fullPath: '/app/dispatch'
+      preLoaderRoute: typeof AuthenticatedAppDispatchRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/deliveries': {
+      id: '/_authenticated/app/deliveries'
+      path: '/deliveries'
+      fullPath: '/app/deliveries'
+      preLoaderRoute: typeof AuthenticatedAppDeliveriesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/customers': {
+      id: '/_authenticated/app/customers'
+      path: '/customers'
+      fullPath: '/app/customers'
+      preLoaderRoute: typeof AuthenticatedAppCustomersRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/branches': {
+      id: '/_authenticated/app/branches'
+      path: '/branches'
+      fullPath: '/app/branches'
+      preLoaderRoute: typeof AuthenticatedAppBranchesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
   }
 }
 
+interface AuthenticatedAppRouteRouteChildren {
+  AuthenticatedAppBranchesRoute: typeof AuthenticatedAppBranchesRoute
+  AuthenticatedAppCustomersRoute: typeof AuthenticatedAppCustomersRoute
+  AuthenticatedAppDeliveriesRoute: typeof AuthenticatedAppDeliveriesRoute
+  AuthenticatedAppDispatchRoute: typeof AuthenticatedAppDispatchRoute
+  AuthenticatedAppExpensesRoute: typeof AuthenticatedAppExpensesRoute
+  AuthenticatedAppPaymentsRoute: typeof AuthenticatedAppPaymentsRoute
+  AuthenticatedAppProductsRoute: typeof AuthenticatedAppProductsRoute
+  AuthenticatedAppReportsRoute: typeof AuthenticatedAppReportsRoute
+  AuthenticatedAppRoutesRoute: typeof AuthenticatedAppRoutesRoute
+  AuthenticatedAppUsersRoute: typeof AuthenticatedAppUsersRoute
+  AuthenticatedAppIndexRoute: typeof AuthenticatedAppIndexRoute
+}
+
+const AuthenticatedAppRouteRouteChildren: AuthenticatedAppRouteRouteChildren = {
+  AuthenticatedAppBranchesRoute: AuthenticatedAppBranchesRoute,
+  AuthenticatedAppCustomersRoute: AuthenticatedAppCustomersRoute,
+  AuthenticatedAppDeliveriesRoute: AuthenticatedAppDeliveriesRoute,
+  AuthenticatedAppDispatchRoute: AuthenticatedAppDispatchRoute,
+  AuthenticatedAppExpensesRoute: AuthenticatedAppExpensesRoute,
+  AuthenticatedAppPaymentsRoute: AuthenticatedAppPaymentsRoute,
+  AuthenticatedAppProductsRoute: AuthenticatedAppProductsRoute,
+  AuthenticatedAppReportsRoute: AuthenticatedAppReportsRoute,
+  AuthenticatedAppRoutesRoute: AuthenticatedAppRoutesRoute,
+  AuthenticatedAppUsersRoute: AuthenticatedAppUsersRoute,
+  AuthenticatedAppIndexRoute: AuthenticatedAppIndexRoute,
+}
+
+const AuthenticatedAppRouteRouteWithChildren =
+  AuthenticatedAppRouteRoute._addFileChildren(
+    AuthenticatedAppRouteRouteChildren,
+  )
+
+interface AuthenticatedDriverRouteRouteChildren {
+  AuthenticatedDriverDeliveriesRoute: typeof AuthenticatedDriverDeliveriesRoute
+  AuthenticatedDriverExpensesRoute: typeof AuthenticatedDriverExpensesRoute
+  AuthenticatedDriverPaymentsRoute: typeof AuthenticatedDriverPaymentsRoute
+  AuthenticatedDriverIndexRoute: typeof AuthenticatedDriverIndexRoute
+}
+
+const AuthenticatedDriverRouteRouteChildren: AuthenticatedDriverRouteRouteChildren =
+  {
+    AuthenticatedDriverDeliveriesRoute: AuthenticatedDriverDeliveriesRoute,
+    AuthenticatedDriverExpensesRoute: AuthenticatedDriverExpensesRoute,
+    AuthenticatedDriverPaymentsRoute: AuthenticatedDriverPaymentsRoute,
+    AuthenticatedDriverIndexRoute: AuthenticatedDriverIndexRoute,
+  }
+
+const AuthenticatedDriverRouteRouteWithChildren =
+  AuthenticatedDriverRouteRoute._addFileChildren(
+    AuthenticatedDriverRouteRouteChildren,
+  )
+
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAppRouteRoute: typeof AuthenticatedAppRouteRouteWithChildren
+  AuthenticatedDriverRouteRoute: typeof AuthenticatedDriverRouteRouteWithChildren
+  AuthenticatedPostLoginRoute: typeof AuthenticatedPostLoginRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAppRouteRoute: AuthenticatedAppRouteRouteWithChildren,
+  AuthenticatedDriverRouteRoute: AuthenticatedDriverRouteRouteWithChildren,
+  AuthenticatedPostLoginRoute: AuthenticatedPostLoginRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AuthRoute: AuthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
