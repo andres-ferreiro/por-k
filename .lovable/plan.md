@@ -1,112 +1,91 @@
 
-# Panadería Ops — Plan v1 (esqueleto)
+# Clientes y Rutas — v1
 
-App web multi-sucursal para panaderías con reparto en rutas. Español, tema claro, fuente Manrope, color de marca `#1c2539` con texto blanco encima.
+Construir CRUD real de **Clientes** y **Rutas** para owner y supervisor, con aislamiento estricto por sucursal vía RLS. Sin tocar entregas ni pagos.
 
-## Enfoque general
+## Base de datos (migración)
 
-- **Stack**: TanStack Start (ya configurado) + Lovable Cloud (Supabase gestionado) para auth, base de datos, storage de fotos y RLS.
-- **Aislamiento de datos por sucursal** desde el día uno, vía RLS y una tabla de roles separada (nunca rol en `profiles`).
-- **Dos shells** separados según rol al hacer login:
-  - `/app/*` → experiencia admin (sidebar, escritorio) para owner / supervisor / cashier.
-  - `/driver/*` → experiencia móvil para driver (instalable estilo PWA-lite más adelante; por ahora layout móvil grande y táctil).
-- **CRUD real solo para 3 cosas** en esta v1: Sucursales, Usuarios, Catálogo. Todo lo demás: páginas navegables con título + empty state.
+Nuevas tablas en `public.*` (todas con `branch_id`, RLS, GRANTs, `updated_at` trigger):
 
-## Roles y acceso
+- `customers`
+  - `id`, `branch_id` (FK branches, NOT NULL), `name`, `phone`, `address`, `lat numeric`, `lng numeric`, `photo_url text`, `notes`, `is_active`, timestamps.
+- `routes`
+  - `id`, `branch_id` (FK, NOT NULL), `name`, `driver_id uuid` (FK profiles, NULLable), `is_active`, timestamps.
+- `route_customers` (pivot ordenado)
+  - `route_id`, `customer_id`, `position int`, PK compuesta (`route_id`,`customer_id`), unique (`route_id`,`position`).
 
-Roles (enum `app_role`): `owner`, `supervisor`, `cashier`, `driver`.
+**RLS** (helper existente `current_branch_id()` + `has_role`):
+- owner: acceso total.
+- supervisor: solo filas con `branch_id = current_branch_id()`. Puede insertar/editar/borrar dentro de su sucursal.
+- cashier/driver: sin acceso de escritura; lectura de `routes`/`route_customers` solo para driver de su propia ruta (opcional, se afina luego).
+- `route_customers`: gating vía `EXISTS (select 1 from routes where id = route_id and (owner or branch))`.
 
-| Rol         | Ve                                          | Shell    |
-|-------------|---------------------------------------------|----------|
-| owner       | Toda la empresa, todas las sucursales       | admin    |
-| supervisor  | Solo su sucursal                            | admin    |
-| cashier     | Solo su sucursal (movimiento de producto)   | admin    |
-| driver      | Solo su ruta/entregas/pagos/gastos          | móvil    |
+**Storage**: bucket privado `customer-photos` con policies:
+- INSERT/SELECT/UPDATE/DELETE permitidos a `authenticated` cuyo `branch_id` del path (primer segmento = `branch_id`) coincida con `current_branch_id()`, u owner.
+- Convención de path: `{branch_id}/{customer_id}/{uuid}.jpg`.
 
-Menú lateral del admin se adapta al rol: cashier ve Despacho/Devoluciones; supervisor ve todo de su sucursal; owner ve Sucursales y Usuarios además.
+## Server functions (`src/lib/api/`)
 
-Tras login, redirección automática al shell correcto. Driver intentando entrar al admin → redirigido a `/driver`, y viceversa.
+`customers.functions.ts`:
+- `listCustomers()` — lee con RLS, ordena por nombre.
+- `createCustomer({ name, phone?, address?, lat?, lng?, notes?, photo_url?, branch_id? })` — supervisor usa su branch; owner debe pasar `branch_id`.
+- `updateCustomer({ id, ...patch })`.
+- `deleteCustomer({ id })` — borra y limpia foto del storage.
+- `getUploadUrl({ customer_id })` — devuelve signed upload URL al bucket (path determinístico) para subir desde el cliente.
 
-## Modelo de datos (alto nivel)
+`routes.functions.ts`:
+- `listRoutes()` — incluye driver (`profiles.full_name`) y conteo de clientes.
+- `getRoute({ id })` — incluye lista ordenada de clientes.
+- `createRoute({ name, driver_id?, branch_id? })`.
+- `updateRoute({ id, name?, driver_id?, is_active? })`.
+- `deleteRoute({ id })`.
+- `setRouteCustomers({ route_id, customer_ids: string[] })` — reemplaza pivot con orden dado (transacción sencilla: delete + insert).
+- `listBranchDrivers({ branch_id? })` — lista profiles con rol `driver` de la sucursal correspondiente, para el selector.
 
-Todo en `public.*`, RLS activo, GRANTs explícitos. Fotos en Storage bucket privado `bakery-photos/` con políticas por sucursal.
+Todas usan `requireSupabaseAuth` con cliente RLS-aware (no admin), excepto subida que firma URL con admin.
 
-- `branches` — sucursales de la empresa.
-- `profiles` — 1:1 con `auth.users`, datos básicos (nombre, teléfono, `branch_id`, `is_active`). **Sin rol aquí.**
-- `user_roles` — `(user_id, role)` único; usa función `has_role(uid, role)` SECURITY DEFINER para evitar recursión RLS.
-- `products` — catálogo compartido por la empresa (seed: Pan dulce, Pan blanco, Tortilla de maíz, Tortilla de harina, Frijoles).
-- `customers` — nombre, contacto, lat/lng, `photo_url`, `branch_id`.
-- `routes` — `branch_id`, `driver_id`, nombre.
-- `route_customers` — pivot orden de visita.
-- `dispatches` — despacho diario (`route_id`, fecha, estado).
-- `dispatch_items` — producto + cantidad que sale.
-- `deliveries` — `dispatch_id`, `customer_id`, estado (`delivered`/`pending`/`failed`), comentario, `photo_url`.
-- `payments` — `delivery_id`, monto, tipo (`cash`/`transfer`/`credit`/`other`), estado.
-- `returns` — devoluciones por despacho/producto.
-- `expenses` — `dispatch_id`/`driver_id`, monto, descripción, `photo_url`.
+## UI
 
-Solo se **crea ahora** lo necesario para v1: `branches`, `profiles`, `user_roles`, `products`, y las tablas vacías mínimas referenciadas por placeholders. Resto se modela pero se completa después.
+### `/app/customers` (reemplazo del placeholder)
+- Tabla: foto (avatar redondo), nombre, teléfono, dirección, ubicación (✓ si tiene lat/lng), acciones.
+- Botón **"Nuevo cliente"** → dialog con:
+  - Nombre, teléfono, dirección, notas.
+  - **Foto**: input file → subir vía signed URL → guardar `photo_url`. Preview antes de guardar.
+  - **Ubicación**: mapa interactivo (Google Maps JS API con `VITE_LOVABLE_CONNECTOR_GOOGLE_MAPS_BROWSER_KEY`). Click en mapa fija marker; campo de búsqueda con `PlaceAutocompleteElement`. Si no hay key, fallback a inputs numéricos lat/lng.
+  - Si owner: select de sucursal.
+- Editar = mismo dialog precargado. Eliminar = confirmación.
 
-### RLS resumen
+### `/app/routes` (reemplazo del placeholder)
+- Tabla: nombre, repartidor asignado, # clientes, acciones.
+- Botón **"Nueva ruta"** → dialog: nombre, select de repartidor (drivers de la sucursal), (owner: sucursal).
+- Click en una ruta → vista de detalle (`/app/routes/$routeId`):
+  - Encabezado editable (nombre, repartidor).
+  - **Clientes en la ruta** (lista ordenada con drag-to-reorder simple usando flechas ↑↓ — sin libs externas).
+  - **Agregar clientes**: panel lateral con clientes disponibles de la sucursal, checkbox para añadir.
+  - Guardar → `setRouteCustomers`.
 
-- `has_role(uid, 'owner')` → acceso total.
-- Supervisor/cashier: filtro por `branch_id = (select branch_id from profiles where id = auth.uid())`.
-- Driver: filtro por sus propias rutas (`routes.driver_id = auth.uid()`).
-- `products`: lectura para todos los autenticados; escritura solo owner.
-- `user_roles`: lectura solo del propio usuario + owner; escritura solo owner (vía server function con `supabaseAdmin`).
+## Aislamiento por sucursal
 
-## Pantallas
+- RLS hace el trabajo pesado: supervisor nunca ve datos de otra sucursal aunque manipule la red.
+- Server fns nunca aceptan `branch_id` de supervisor (se ignora y se usa `current_branch_id`).
+- Owner sí pasa `branch_id` explícito y se valida que exista.
 
-### Admin shell (`/app`)
-Sidebar con: Sucursales (owner), Usuarios (owner), Catálogo (owner), Clientes, Rutas, Despacho, Entregas, Pagos, Gastos, Reportes. Header con nombre + logout.
+## Mapa (detalle técnico)
 
-- **Sucursales** (CRUD real): listar, crear, editar, activar/desactivar.
-- **Usuarios** (CRUD real): listar, invitar (crear con email+password vía server fn admin), asignar rol + sucursal, activar/desactivar.
-- **Catálogo** (CRUD real): listar, crear, editar, activar/desactivar productos.
-- Resto: página con título + empty state ("Próximamente" / "Sin datos todavía").
+Usar el conector Google Maps ya disponible. Cargar Maps JS API async con callback global, sin `mapId`, marker clásico (`google.maps.Marker`). Place Autocomplete con `AutocompleteSuggestion.fetchAutocompleteSuggestions` (API New). Componente reutilizable `<LocationPicker value={{lat,lng}} onChange={...} />` en `src/components/location-picker.tsx`.
 
-### Driver shell (`/driver`)
-Layout móvil (max-width, botones grandes). Tabs inferiores: Mi ruta, Entregas, Pagos, Gastos. Todas placeholder excepto el saludo + nombre del driver.
+## Fuera de alcance
 
-## Look & feel
+- Drag&drop con librería externa (usar ↑↓ por ahora).
+- Reasignación masiva de clientes entre rutas.
+- Histórico de rutas/clientes.
+- Entregas, pagos, gastos — intactos.
 
-- Tema claro shadcn, fuente **Manrope** cargada vía `<link>` en `__root.tsx`.
-- Token de marca en `src/styles.css`: `--primary: oklch(...)` equivalente a `#1c2539`, `--primary-foreground` blanco.
-- Acento usado en sidebar activo, botones primarios, header del driver.
-- Resto neutral (grises/blancos shadcn por defecto).
+## Orden de ejecución
 
-## Detalles técnicos
-
-- **Auth**: email/password (Lovable Cloud). Página `/auth` pública con login + (oculto tras owner) creación de usuarios. Sin password reset en v1 (placeholder).
-- **Rutas protegidas**: `_authenticated/` gestionado por la integración. Subcarpetas `_authenticated/app/` y `_authenticated/driver/` con `beforeLoad` que verifica rol vía server fn y redirige al shell correcto.
-- **Server functions** (`createServerFn` + `requireSupabaseAuth`):
-  - `getMyContext()` → devuelve rol(es), branch_id, perfil.
-  - `listBranches`, `createBranch`, `updateBranch`.
-  - `listUsers`, `createUser` (usa `supabaseAdmin.auth.admin.createUser` + asigna rol + branch), `updateUserRole`, `setUserActive`.
-  - `listProducts`, `createProduct`, `updateProduct`.
-- **Seed**: migración inserta los 5 productos iniciales.
-- **Storage**: bucket `bakery-photos` creado pero sin uploads en v1 (se usará después para customers/deliveries/expenses).
-
-## Diagrama de navegación
-
-```text
-/auth ──login──┬─► owner/supervisor/cashier ─► /app  ─► (sidebar adaptado al rol)
-               └─► driver ─────────────────► /driver ─► (tabs móviles)
-```
-
-## Criterios de "hecho" para v1
-
-- Login → redirige al shell correcto según rol.
-- Owner crea sucursales, crea usuarios con rol+sucursal, gestiona productos.
-- Supervisor/cashier solo ve datos de su sucursal (verificado vía RLS).
-- Driver solo accede a `/driver`.
-- Todas las demás pantallas existen navegables como placeholders.
-- 5 productos seed presentes.
-
-## Fuera de alcance (para después)
-
-Lógica real de despacho, entregas, pagos, devoluciones, gastos, reportes; subida de fotos; mapas en vivo; pasarelas de pago; notificaciones; PWA instalable real.
-
----
-
-¿Procedo a construir esta v1, o quieres ajustar algo (roles, nombres de menú, alcance del CRUD inicial)?
+1. Migración (tablas + RLS + GRANTs + bucket + policies storage).
+2. Server fns customers + routes.
+3. Componente `LocationPicker`.
+4. Página `/app/customers` (lista + dialog).
+5. Página `/app/routes` (lista + dialog) + ruta detalle `/app/routes/$routeId`.
+6. Verificar en preview con usuario supervisor.
