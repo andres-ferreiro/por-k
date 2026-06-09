@@ -17,6 +17,7 @@ import { listPaymentsAdmin } from "@/lib/api/admin.functions";
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { downloadCSV } from "@/lib/csv";
 import { Download } from "lucide-react";
 
