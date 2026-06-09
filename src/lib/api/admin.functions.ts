@@ -438,23 +438,36 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
     const { startISO } = tzDayRange(data.date_from);
     const { endISO } = tzDayRange(data.date_to);
     const [delsRes, paysRes, expsRes] = await Promise.all([
-      context.supabase
-        .from("deliveries")
-        .select("driver_id, status, delivery_items(line_total)")
-        .gte("delivery_date", data.date_from)
-        .lte("delivery_date", data.date_to)
-        .eq("status", "delivered"),
-      context.supabase
-        .from("payments")
-        .select("driver_id, amount, status")
-        .gte("paid_at", startISO)
-        .lt("paid_at", endISO),
-      context.supabase
-        .from("expenses")
-        .select("driver_id, amount")
-        .gte("expense_date", data.date_from)
-        .lte("expense_date", data.date_to),
-    ]);
+    const bid = data.branch_id ?? null;
+    let delQ = context.supabase
+      .from("deliveries")
+      .select("driver_id, status, delivery_items(line_total)")
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to)
+      .eq("status", "delivered");
+    if (bid) delQ = delQ.eq("branch_id", bid);
+    if (data.route_id) delQ = delQ.eq("route_id", data.route_id);
+    if (data.driver_id) delQ = delQ.eq("driver_id", data.driver_id);
+
+    let payQ = context.supabase
+      .from("payments")
+      .select("driver_id, amount, status")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO);
+    if (bid) payQ = payQ.eq("branch_id", bid);
+    if (data.route_id) payQ = payQ.eq("route_id", data.route_id);
+    if (data.driver_id) payQ = payQ.eq("driver_id", data.driver_id);
+
+    let expQ = context.supabase
+      .from("expenses")
+      .select("driver_id, amount")
+      .gte("expense_date", data.date_from)
+      .lte("expense_date", data.date_to);
+    if (bid) expQ = expQ.eq("branch_id", bid);
+    if (data.route_id) expQ = expQ.eq("route_id", data.route_id);
+    if (data.driver_id) expQ = expQ.eq("driver_id", data.driver_id);
+
+    const [delsRes, paysRes, expsRes] = await Promise.all([delQ, payQ, expQ]);
     for (const r of [delsRes, paysRes, expsRes]) if (r.error) throw new Error(r.error.message);
 
     type Row = {
