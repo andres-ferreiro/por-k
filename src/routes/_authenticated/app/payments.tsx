@@ -52,8 +52,9 @@ function PaymentsPage() {
     queryFn: () => driversFn({ data: { branch_id: null } }),
   });
 
+  const { branchId } = useBranchScope();
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["admin", "payments", dateFrom, dateTo, routeId, driverId, method, status, origin],
+    queryKey: ["admin", "payments", dateFrom, dateTo, routeId, driverId, method, status, origin, branchId],
     queryFn: () =>
       listFn({
         data: {
@@ -64,6 +65,7 @@ function PaymentsPage() {
           method: method === "all" ? null : (method as any),
           status: status === "all" ? null : (status as any),
           origin: origin === "all" ? null : (origin as any),
+          branch_id: branchId,
         },
       }),
   });
