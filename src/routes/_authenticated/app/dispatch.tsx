@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { getMyContext } from "@/lib/api/context.functions";
+import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -250,8 +251,7 @@ function NewDispatchCard() {
 }
 
 function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return todayInTZ();
 }
 
 function DailySummaryCard() {
@@ -295,9 +295,10 @@ function DailySummaryCard() {
             <p className="text-sm text-muted-foreground">Sin despachos en esta fecha.</p>
           )}
           {(list ?? []).map((r) => {
-            const time = new Date(r.dispatched_at).toLocaleTimeString([], {
+            const time = new Date(r.dispatched_at).toLocaleTimeString(APP_LOCALE, {
               hour: "2-digit",
               minute: "2-digit",
+              timeZone: APP_TZ,
             });
             return (
               <div
@@ -367,7 +368,7 @@ function DispatchDetailDialog({ id, onClose }: { id: string | null; onClose: () 
               <div>
                 <div className="text-xs text-muted-foreground">Hora</div>
                 <div className="font-medium">
-                  {new Date(data.dispatched_at).toLocaleString()}
+                  {new Date(data.dispatched_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "medium", timeStyle: "short" })}
                 </div>
               </div>
             </div>

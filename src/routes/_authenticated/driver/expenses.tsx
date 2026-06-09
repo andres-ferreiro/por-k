@@ -83,7 +83,7 @@ function Page() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{r.description}</div>
                   <div className="text-xs text-muted-foreground">
-                    {new Date(r.created_at).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
+                    {new Date(r.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Ciudad_Juarez" })}
                   </div>
                 </div>
                 <div className="font-semibold">{fmt(r.amount)}</div>

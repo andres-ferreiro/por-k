@@ -59,8 +59,8 @@ function Page() {
   const total = data.customers.length;
   const done = data.customers.filter((c) => c.delivery && c.delivery.status !== "pending").length;
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-  const dateLabel = new Date(data.date + "T00:00:00").toLocaleDateString("es", {
-    weekday: "long", day: "numeric", month: "long",
+  const dateLabel = new Date(data.date + "T12:00:00Z").toLocaleDateString("es-MX", {
+    weekday: "long", day: "numeric", month: "long", timeZone: "America/Ciudad_Juarez",
   });
 
   return (
