@@ -24,7 +24,7 @@ function Page() {
     queryFn: () => fetchRoute(),
   });
 
-  const [selected, setSelected] = useState<{ id: string; name: string; status: any; comment: string | null; photo_url: string | null } | null>(null);
+  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
 
   if (isLoading) {
     return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -36,8 +36,8 @@ function Page() {
     pending: rows.filter((r) => r.status === "pending").length,
     failed: rows.filter((r) => r.status === "failed").length,
   };
+  const fmt = (n: number) => n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
 
-  // Allow editing only if the customer is in today's route
   const customerInRoute = (id: string) => route?.customers.find((c) => c.id === id);
 
   return (
@@ -67,18 +67,15 @@ function Page() {
               <Card
                 key={r.id}
                 className={canEdit ? "cursor-pointer hover:bg-accent/40 transition" : ""}
-                onClick={() => canEdit && setSelected({
-                  id: r.customer_id,
-                  name: r.customer_name ?? "",
-                  status: r.status,
-                  comment: r.comment,
-                  photo_url: r.photo_url,
-                })}
+                onClick={() => canEdit && setSelected({ id: r.customer_id, name: r.customer_name ?? "" })}
               >
                 <CardContent className="py-3 flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="font-medium truncate">{r.customer_name}</div>
-                    {r.comment && <div className="text-xs text-muted-foreground line-clamp-2">{r.comment}</div>}
+                    <div className="text-xs text-muted-foreground">
+                      {r.units > 0 ? `${r.units} u · ${fmt(r.total)}` : "Sin productos"}
+                    </div>
+                    {r.comment && <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{r.comment}</div>}
                   </div>
                   <Badge variant="outline" className={meta.cls}>{meta.label}</Badge>
                 </CardContent>
@@ -91,12 +88,12 @@ function Page() {
       <DeliverySheet
         open={!!selected}
         onOpenChange={(o) => !o && setSelected(null)}
-        customer={selected ? { id: selected.id, name: selected.name } : null}
-        initial={selected ? { status: selected.status, comment: selected.comment, photo_url: selected.photo_url } : null}
+        customer={selected}
       />
     </div>
   );
 }
+
 
 function StatCard({ label, value, cls, icon: Icon }: any) {
   return (

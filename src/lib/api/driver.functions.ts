@@ -113,7 +113,6 @@ export const upsertDelivery = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const today = todayStr();
 
-    // Resolve route for this driver
     const { data: routes, error: rErr } = await supabase
       .from("routes")
       .select("id, branch_id")
@@ -125,7 +124,6 @@ export const upsertDelivery = createServerFn({ method: "POST" })
     const route = (routes ?? [])[0] as any;
     if (!route) throw new Error("No tienes una ruta asignada.");
 
-    // Verify customer belongs to this route
     const { data: rc, error: rcErr } = await supabase
       .from("route_customers")
       .select("customer_id")
@@ -156,6 +154,195 @@ export const upsertDelivery = createServerFn({ method: "POST" })
     return row;
   });
 
+// Products with effective price for a given customer (driver's route)
+export const getCustomerPricedProducts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ customer_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { data: products, error: pErr } = await supabase
+      .from("products")
+      .select("id, name, unit, price")
+      .eq("is_active", true)
+      .order("name");
+    if (pErr) throw new Error(pErr.message);
+    const { data: overrides, error: oErr } = await supabase
+      .from("customer_prices")
+      .select("product_id, price")
+      .eq("customer_id", data.customer_id);
+    if (oErr) throw new Error(oErr.message);
+    const ov = new Map((overrides ?? []).map((o: any) => [o.product_id, Number(o.price)]));
+    return (products ?? []).map((p: any) => ({
+      id: p.id as string,
+      name: p.name as string,
+      unit: p.unit as string,
+      base_price: Number(p.price),
+      effective_price: ov.has(p.id) ? (ov.get(p.id) as number) : Number(p.price),
+      has_override: ov.has(p.id),
+    }));
+  });
+
+// Existing items + returns for today's delivery (if any)
+export const getTodayDeliveryDetail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ customer_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+    const { data: routes } = await supabase
+      .from("routes").select("id").eq("driver_id", userId).eq("is_active", true)
+      .order("updated_at", { ascending: false }).limit(1);
+    const routeId = (routes ?? [])[0]?.id;
+    if (!routeId) return { delivery: null, items: [], returns: [], payment: null };
+
+    const { data: del } = await supabase
+      .from("deliveries")
+      .select("id, status, comment, photo_url")
+      .eq("route_id", routeId).eq("customer_id", data.customer_id).eq("delivery_date", today)
+      .maybeSingle();
+    if (!del) return { delivery: null, items: [], returns: [], payment: null };
+
+    const [{ data: items }, { data: rets }, { data: pay }] = await Promise.all([
+      supabase.from("delivery_items").select("product_id, quantity, unit_price").eq("delivery_id", del.id),
+      supabase.from("delivery_returns").select("product_id, quantity").eq("delivery_id", del.id),
+      supabase.from("payments").select("id, amount, method, status").eq("delivery_id", del.id).maybeSingle(),
+    ]);
+
+    return {
+      delivery: { id: del.id, status: del.status, comment: del.comment, photo_url: del.photo_url },
+      items: (items ?? []).map((i: any) => ({ product_id: i.product_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
+      returns: (rets ?? []).map((r: any) => ({ product_id: r.product_id, quantity: Number(r.quantity) })),
+      payment: pay ? { method: pay.method, status: pay.status, amount: Number(pay.amount) } : null,
+    };
+  });
+
+const lineSchema = z.object({
+  product_id: z.string().uuid(),
+  quantity: z.number().positive().max(100000),
+});
+
+const saveDeliveryVisitSchema = z.object({
+  customer_id: z.string().uuid(),
+  status: deliveryStatusEnum,
+  comment: z.string().trim().max(500).nullable().optional(),
+  photo_path: z.string().max(500).nullable().optional(),
+  items: z.array(lineSchema).max(100).default([]),
+  returns: z.array(lineSchema).max(100).default([]),
+  payment: z.object({
+    method: z.enum(["cash", "transfer", "credit", "other"]),
+    status: z.enum(["paid", "pending"]),
+  }),
+});
+
+export const saveDeliveryVisit = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => saveDeliveryVisitSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+
+    const { data: routes, error: rErr } = await supabase
+      .from("routes").select("id, branch_id")
+      .eq("driver_id", userId).eq("is_active", true)
+      .order("updated_at", { ascending: false }).limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) throw new Error("No tienes una ruta asignada.");
+
+    const { data: rc, error: rcErr } = await supabase
+      .from("route_customers").select("customer_id")
+      .eq("route_id", route.id).eq("customer_id", data.customer_id).maybeSingle();
+    if (rcErr) throw new Error(rcErr.message);
+    if (!rc) throw new Error("Cliente no pertenece a tu ruta.");
+
+    // Upsert delivery
+    const { data: del, error: dErr } = await supabase
+      .from("deliveries")
+      .upsert(
+        {
+          branch_id: route.branch_id,
+          route_id: route.id,
+          customer_id: data.customer_id,
+          driver_id: userId,
+          delivery_date: today,
+          status: data.status,
+          comment: data.comment ?? null,
+          photo_url: data.photo_path ?? null,
+        },
+        { onConflict: "route_id,customer_id,delivery_date" },
+      )
+      .select("id")
+      .single();
+    if (dErr) throw new Error(dErr.message);
+    const deliveryId = del.id as string;
+
+    // Resolve prices for all item products
+    const itemProductIds = data.items.map((i) => i.product_id);
+    const priceMap = new Map<string, number>();
+    if (itemProductIds.length > 0) {
+      const [{ data: prods, error: pErr }, { data: ov, error: oErr }] = await Promise.all([
+        supabase.from("products").select("id, price").in("id", itemProductIds),
+        supabase.from("customer_prices").select("product_id, price")
+          .eq("customer_id", data.customer_id).in("product_id", itemProductIds),
+      ]);
+      if (pErr) throw new Error(pErr.message);
+      if (oErr) throw new Error(oErr.message);
+      for (const p of prods ?? []) priceMap.set(p.id as string, Number((p as any).price));
+      for (const o of ov ?? []) priceMap.set((o as any).product_id, Number((o as any).price));
+    }
+
+    // Replace items
+    await supabase.from("delivery_items").delete().eq("delivery_id", deliveryId);
+    let total = 0;
+    if (data.items.length > 0) {
+      const rows = data.items.map((i) => {
+        const price = priceMap.get(i.product_id) ?? 0;
+        total += price * i.quantity;
+        return { delivery_id: deliveryId, product_id: i.product_id, quantity: i.quantity, unit_price: price };
+      });
+      const { error: iErr } = await supabase.from("delivery_items").insert(rows);
+      if (iErr) throw new Error(iErr.message);
+    }
+
+    // Replace returns
+    await supabase.from("delivery_returns").delete().eq("delivery_id", deliveryId);
+    if (data.returns.length > 0) {
+      const rows = data.returns.map((r) => ({
+        delivery_id: deliveryId, product_id: r.product_id, quantity: r.quantity,
+      }));
+      const { error: retErr } = await supabase.from("delivery_returns").insert(rows);
+      if (retErr) throw new Error(retErr.message);
+    }
+
+    // Payment: only when delivered and total>0; otherwise remove
+    const { data: existingPay } = await supabase
+      .from("payments").select("id").eq("delivery_id", deliveryId).maybeSingle();
+
+    if (data.status === "delivered" && total > 0) {
+      const payRow = {
+        branch_id: route.branch_id,
+        route_id: route.id,
+        customer_id: data.customer_id,
+        driver_id: userId,
+        delivery_id: deliveryId,
+        amount: Number(total.toFixed(2)),
+        method: data.payment.method,
+        status: data.payment.status,
+      };
+      if (existingPay) {
+        const { error } = await supabase.from("payments").update(payRow).eq("id", existingPay.id);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await supabase.from("payments").insert(payRow);
+        if (error) throw new Error(error.message);
+      }
+    } else if (existingPay) {
+      await supabase.from("payments").delete().eq("id", existingPay.id);
+    }
+
+    return { ok: true, delivery_id: deliveryId, total };
+  });
+
 export const listTodayDeliveries = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -163,21 +350,29 @@ export const listTodayDeliveries = createServerFn({ method: "GET" })
     const today = todayStr();
     const { data, error } = await supabase
       .from("deliveries")
-      .select("id, status, comment, photo_url, customer_id, updated_at, customers(name)")
+      .select("id, status, comment, photo_url, customer_id, updated_at, customers(name), delivery_items(quantity, unit_price)")
       .eq("driver_id", userId)
       .eq("delivery_date", today)
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => ({
-      id: r.id as string,
-      status: r.status as "pending" | "delivered" | "failed",
-      comment: r.comment as string | null,
-      photo_url: r.photo_url as string | null,
-      customer_id: r.customer_id as string,
-      customer_name: r.customers?.name ?? null,
-      updated_at: r.updated_at as string,
-    }));
+    return (data ?? []).map((r: any) => {
+      const items = (r.delivery_items ?? []) as Array<{ quantity: number; unit_price: number }>;
+      const total = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
+      const units = items.reduce((s, it) => s + Number(it.quantity), 0);
+      return {
+        id: r.id as string,
+        status: r.status as "pending" | "delivered" | "failed",
+        comment: r.comment as string | null,
+        photo_url: r.photo_url as string | null,
+        customer_id: r.customer_id as string,
+        customer_name: r.customers?.name ?? null,
+        updated_at: r.updated_at as string,
+        total,
+        units,
+      };
+    });
   });
+
 
 // ============ PAYMENTS ============
 

@@ -44,6 +44,45 @@ export type Database = {
         }
         Relationships: []
       }
+      customer_prices: {
+        Row: {
+          created_at: string
+          customer_id: string
+          price: number
+          product_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          price: number
+          product_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          price?: number
+          product_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_prices_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_prices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           address: string | null
@@ -164,6 +203,96 @@ export type Database = {
             columns: ["route_id"]
             isOneToOne: false
             referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_items: {
+        Row: {
+          created_at: string
+          delivery_id: string
+          id: string
+          line_total: number | null
+          product_id: string
+          quantity: number
+          unit_price: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delivery_id: string
+          id?: string
+          line_total?: number | null
+          product_id: string
+          quantity: number
+          unit_price: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delivery_id?: string
+          id?: string
+          line_total?: number | null
+          product_id?: string
+          quantity?: number
+          unit_price?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_items_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_returns: {
+        Row: {
+          created_at: string
+          delivery_id: string
+          id: string
+          product_id: string
+          quantity: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delivery_id: string
+          id?: string
+          product_id: string
+          quantity: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delivery_id?: string
+          id?: string
+          product_id?: string
+          quantity?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_returns_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_returns_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
         ]
@@ -342,6 +471,7 @@ export type Database = {
           branch_id: string
           created_at: string
           customer_id: string
+          delivery_id: string | null
           driver_id: string
           id: string
           method: Database["public"]["Enums"]["payment_method"]
@@ -356,6 +486,7 @@ export type Database = {
           branch_id: string
           created_at?: string
           customer_id: string
+          delivery_id?: string | null
           driver_id: string
           id?: string
           method?: Database["public"]["Enums"]["payment_method"]
@@ -370,6 +501,7 @@ export type Database = {
           branch_id?: string
           created_at?: string
           customer_id?: string
+          delivery_id?: string | null
           driver_id?: string
           id?: string
           method?: Database["public"]["Enums"]["payment_method"]
@@ -395,6 +527,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "payments_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "payments_driver_id_fkey"
             columns: ["driver_id"]
             isOneToOne: false
@@ -416,6 +555,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          price: number
           unit: string
           updated_at: string
         }
@@ -424,6 +564,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          price?: number
           unit?: string
           updated_at?: string
         }
@@ -432,6 +573,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          price?: number
           unit?: string
           updated_at?: string
         }
@@ -583,6 +725,10 @@ export type Database = {
     }
     Functions: {
       current_branch_id: { Args: never; Returns: string }
+      get_price_for: {
+        Args: { _customer_id: string; _product_id: string }
+        Returns: number
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

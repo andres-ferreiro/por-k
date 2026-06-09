@@ -6,9 +6,9 @@ import { getMyRouteToday } from "@/lib/api/driver.functions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, Phone, CheckCircle2, Clock, XCircle, PackageCheck, Wallet, Loader2 } from "lucide-react";
+import { MapPin, Phone, CheckCircle2, Clock, XCircle, PackageCheck, Loader2 } from "lucide-react";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
-import { PaymentSheet } from "@/components/driver/payment-sheet";
+
 
 export const Route = createFileRoute("/_authenticated/driver/")({
   component: Page,
@@ -34,7 +34,7 @@ function statusMeta(status?: "pending" | "delivered" | "failed" | null) {
 function Page() {
   const { data, isLoading } = useMyRoute();
   const [deliveryFor, setDeliveryFor] = useState<Customer | null>(null);
-  const [paymentFor, setPaymentFor] = useState<Customer | null>(null);
+
 
   if (isLoading) {
     return (
@@ -135,14 +135,9 @@ function Page() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button onClick={() => setDeliveryFor(c)} className="h-11">
-                    <PackageCheck className="h-4 w-4" /> Entrega
-                  </Button>
-                  <Button onClick={() => setPaymentFor(c)} variant="secondary" className="h-11">
-                    <Wallet className="h-4 w-4" /> Pago
-                  </Button>
-                </div>
+                <Button onClick={() => setDeliveryFor(c)} className="w-full h-11">
+                  <PackageCheck className="h-4 w-4" /> Vender / Entregar
+                </Button>
               </CardContent>
             </Card>
           );
@@ -153,13 +148,9 @@ function Page() {
         open={!!deliveryFor}
         onOpenChange={(o) => !o && setDeliveryFor(null)}
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
-        initial={deliveryFor?.delivery ?? null}
       />
-      <PaymentSheet
-        open={!!paymentFor}
-        onOpenChange={(o) => !o && setPaymentFor(null)}
-        customer={paymentFor ? { id: paymentFor.id, name: paymentFor.name } : null}
-      />
+
     </div>
   );
 }
+
