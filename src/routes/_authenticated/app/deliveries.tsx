@@ -60,8 +60,9 @@ function DeliveriesPage() {
     queryFn: () => driversFn({ data: { branch_id: null } }),
   });
 
+  const { branchId } = useBranchScope();
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["admin", "deliveries", dateFrom, dateTo, routeId, driverId, status],
+    queryKey: ["admin", "deliveries", dateFrom, dateTo, routeId, driverId, status, branchId],
     queryFn: () =>
       listFn({
         data: {
@@ -70,6 +71,7 @@ function DeliveriesPage() {
           route_id: routeId === "all" ? null : routeId,
           driver_id: driverId === "all" ? null : driverId,
           status: status === "all" ? null : (status as any),
+          branch_id: branchId,
         },
       }),
   });
