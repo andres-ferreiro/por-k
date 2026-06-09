@@ -155,6 +155,7 @@ const dateRangeSchema = z.object({
   date_to: dateStr,
   route_id: z.string().uuid().optional().nullable(),
   driver_id: z.string().uuid().optional().nullable(),
+  branch_id: branchIdField,
 });
 
 export const listDeliveriesAdmin = createServerFn({ method: "POST" })
