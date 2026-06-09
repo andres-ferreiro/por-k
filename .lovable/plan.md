@@ -1,84 +1,77 @@
-# Driver Mobile Experience (PWA)
 
-Build a fast, phone-first experience for the driver role, installable from the browser. Reuses the existing `/driver` shell (bottom-tab nav, max-w-md, already gated by role).
+# Ventas por entrega, precios y devoluciones
 
-## What the driver gets
+Objetivo: el repartidor deja de "registrar pago suelto". En cada visita captura **productos vendidos** y **productos devueltos**; el sistema calcula el total con el precio del cliente (o global) y crea el cobro automáticamente con efectivo por defecto (puede cambiar a transferencia/crédito/pendiente).
 
-### 1. "Mi ruta" (`/driver`)
-- Header: today's date + assigned route name + branch.
-- Big card showing route progress: `X / N entregadas` with a progress bar.
-- Ordered list of customers (by `route_customers.position`), each as a tappable card showing:
-  - Name, phone (tap to call), address.
-  - Status badge: pendiente / entregado / fallido (color-coded).
-  - "Ubicación" link → opens Google Maps with `lat,lng` (or address fallback).
-  - Quick action buttons: **Entregar**, **Pago**, **Gasto** (the last opens the expenses tab pre-filled with today).
-- Empty state when driver has no route assigned.
+## 1. Base de datos (migración)
 
-### 2. Entrega (delivery) flow
-Triggered from a customer card → opens a bottom sheet (`Drawer`):
-- Status: Entregado (default) / Pendiente / Fallido — large segmented buttons.
-- Comentario (textarea, optional).
-- Foto de evidencia (optional): one-tap camera button using `<input type="file" accept="image/*" capture="environment">`. Preview thumbnail + remove. Uploaded to a new private `delivery-photos` bucket at `{driver_id}/{delivery_id}.jpg`.
-- Guardar → upserts on `(route_id, customer_id, delivery_date)`; closes sheet, customer card reflects new status, progress bar updates.
+**products** — agregar:
+- `price numeric(12,2) not null default 0` (precio global).
 
-### 3. Pago (`/driver/payments`)
-- Sheet flow opened from a customer card OR a "+" FAB on the payments tab (select customer from route list).
-- Fields: monto (number), estado (Pagado default / Pendiente), método radio (**Efectivo** preselected, Transferencia, Crédito, Otro), nota (optional).
-- Payments tab body: today's totals (por método) + list of today's payments grouped by customer with edit/delete.
+**customer_prices** (nueva) — precios especiales por cliente:
+- `customer_id`, `product_id` (PK compuesta), `price numeric(12,2) not null`, timestamps.
+- RLS: lectura para staff de la sucursal del cliente + repartidor asignado a una ruta del cliente; escritura para owner/supervisor de la sucursal.
+- Configurable desde la ficha del **producto**: lista de clientes con override de precio.
 
-### 4. Gasto (`/driver/expenses`)
-- "+" FAB opens sheet with: monto, descripción, foto del recibo (same camera input pattern, uploaded to `expense-photos` bucket).
-- Tab body: today's total + list of today's expenses with thumbnail.
+**delivery_items** (nueva) — líneas de venta de la entrega:
+- `delivery_id`, `product_id`, `quantity numeric>0`, `unit_price numeric(12,2)` (congelado al guardar), `line_total numeric` (generated `quantity*unit_price`).
+- Único `(delivery_id, product_id)`. RLS espejo de `deliveries`.
 
-### 5. Entregas tab (`/driver/deliveries`)
-- Today's deliveries grouped by status with counters. Tap any row to re-open its sheet to edit.
+**delivery_returns** (nueva) — devoluciones registradas en la visita:
+- `delivery_id`, `product_id`, `quantity numeric>0`, timestamps. Único `(delivery_id, product_id)`. RLS espejo de `deliveries`.
 
-## Installable PWA (manifest-only)
-- Add `public/manifest.webmanifest` with name, short_name, theme_color matching primary, `display: "standalone"`, `start_url: "/driver"`, icons.
-- Generate two app icons (192, 512) in `public/`.
-- Add `<link rel="manifest">`, `<meta name="theme-color">`, `<link rel="apple-touch-icon">` in `__root.tsx` head.
-- No service worker (no offline requested) — follows the PWA-minimum guidance.
+**payments** — agregar `delivery_id uuid null` (FK) para enlazar el cobro auto-generado a la entrega; cuando el repartidor edita la entrega, el pago se recalcula/reemplaza.
 
-## Technical details
+Función helper `get_price_for(customer_id, product_id) → numeric` (security definer): regresa `customer_prices.price` si existe, si no `products.price`.
 
-### New tables (migration)
-- `deliveries`: `id`, `branch_id`, `route_id`, `customer_id`, `driver_id`, `delivery_date date`, `status` (enum `delivery_status`: pending|delivered|failed), `comment`, `photo_url`, timestamps. Unique `(route_id, customer_id, delivery_date)`.
-- `payments`: `id`, `branch_id`, `route_id`, `customer_id`, `driver_id`, `amount numeric`, `status` (paid|pending), `method` (cash|transfer|credit|other), `note`, `paid_at`, timestamps.
-- `expenses`: `id`, `branch_id`, `route_id` (nullable), `driver_id`, `amount numeric`, `description`, `photo_url`, `expense_date date`, timestamps.
+## 2. Server functions
 
-All tables: `ENABLE RLS`, `GRANT` to `authenticated` + `service_role`. Policies:
-- Driver can insert/select/update own rows (`driver_id = auth.uid()`).
-- Branch staff (cashier/supervisor) and owner can view rows in their branch via `current_branch_id()`.
+`src/lib/api/products.functions.ts`:
+- `updateProductPrice({id, price})`.
+- `listProductCustomerPrices(productId)` → clientes de la sucursal del owner/supervisor + override actual.
+- `upsertCustomerPrice({product_id, customer_id, price})`, `deleteCustomerPrice(...)`.
 
-### Storage buckets
-- `delivery-photos` (private), `expense-photos` (private). RLS on `storage.objects`:
-  - Driver can insert/select objects under path prefix `{auth.uid()}/...`.
-  - Branch staff can select for their branch (via joined row lookup — simplified to "authenticated of same branch can read all" via a helper, or keep driver-scoped only and signed-URL the photo through a server fn). Simpler: driver-only RW; reads for other roles go through `getDeliveryPhotoUrl` server fn using `supabaseAdmin` + signed URL.
+`src/lib/api/driver.functions.ts` — reemplazar `upsertDelivery`:
+- `getCustomerPricedProducts(customerId)` → lista de productos activos con `effective_price` resuelto (override o global). Usado por la hoja de entrega.
+- `saveDeliveryVisit({ customer_id, status, comment, photo_path?, items:[{product_id, quantity}], returns:[{product_id, quantity}], payment:{ method, status } })`:
+  - Upsert `deliveries` (status, comentario, foto).
+  - Reemplaza `delivery_items` y `delivery_returns` (delete + insert) con precios congelados desde `get_price_for`.
+  - Recalcula total = Σ line_total. Si `status='delivered'` y total>0: upsert un único `payments` row con `delivery_id`=esta entrega, `amount=total`, `method`, `status` (paid|pending). Si total=0 o entrega no fue 'delivered': borra el payment ligado.
+- `createPayment` queda solo para abonos manuales sueltos (ej. cliente paga deuda anterior); UI de Pagos sigue funcionando.
 
-### Server functions (`src/lib/api/driver.functions.ts`)
-- `getMyRouteToday()` → route + ordered customers + today's delivery status map.
-- `upsertDelivery({ customer_id, status, comment, photo_path? })`.
-- `listTodayDeliveries()` / `listTodayPayments()` / `listTodayExpenses()`.
-- `createPayment({...})`, `createExpense({...})`.
-- `getSignedPhotoUrl({ bucket, path })` (for re-display in edit sheet).
-- All use `requireSupabaseAuth`; resolve `branch_id` from `profiles`.
+## 3. UI
 
-### UI files
-- Rewrite `src/routes/_authenticated/driver/index.tsx` (Mi ruta).
-- Rewrite `src/routes/_authenticated/driver/deliveries.tsx`, `payments.tsx`, `expenses.tsx`.
-- New shared sheets: `src/components/driver/delivery-sheet.tsx`, `payment-sheet.tsx`, `expense-sheet.tsx`, `photo-capture.tsx`.
-- Use `vaul` `Drawer` (already installed) for bottom sheets; `Input`, `Textarea`, `RadioGroup`, `Badge`, `Button`.
+### Productos (`/app/products`, owner)
+- Campo **Precio** en alta/edición.
+- Botón "Precios por cliente" en cada producto → dialog con lista de clientes (buscable, agrupados por sucursal) y input de precio; vacío = usa precio global.
 
-### Order of work
-1. Migration (tables, enums, RLS, grants).
-2. Storage buckets (tool call) + storage RLS policies.
-3. Server functions.
-4. PWA manifest + icons + head tags.
-5. UI: Mi ruta + delivery sheet → payments → expenses → deliveries tab.
-6. Manual verification with a driver account.
+### Repartidor — hoja de entrega (`delivery-sheet.tsx`, rediseño)
+Una sola pantalla, scroll vertical, secciones colapsadas:
+1. **Estado**: Entregado (default) / Pendiente / Fallido (igual que hoy).
+2. **Productos vendidos** (visible si Entregado): lista de productos del cliente con precio efectivo; el repartidor pone cantidad con stepper +/−. Muestra subtotal por línea y **Total** grande abajo.
+3. **Devoluciones de ayer** (colapsable, "Agregar devolución"): mismo stepper sobre productos; no afecta total cobrado, solo se registra.
+4. **Cobro** (si Entregado y total>0): chips método (Efectivo default, Transferencia, Crédito, Otro) + toggle Pagado/Pendiente. Muestra "Se cobrará $X".
+5. **Comentario** + **Foto** (igual que hoy).
+6. **Guardar**: una sola acción que persiste todo y crea/actualiza el pago.
 
-## Out of scope
-- Offline mode / service worker (only manifest installability).
-- Returns, inventory adjustments.
-- Push notifications.
-- Editing past-day records (only today is mutable from driver UI).
+Tarjeta del cliente en `/driver`: el botón "Pago" se reemplaza por "Vender / Entregar" (abre la misma hoja). El FAB "+" en `/driver/payments` queda solo para abonos manuales (cobro de deuda sin entrega del día).
+
+### Entregas/Pagos tabs del repartidor
+- Tab entregas: cada fila muestra `#productos · total $X` adicional al status.
+- Tab pagos: badge en pagos auto-generados ("Venta entrega"), tap reabre la hoja de entrega.
+
+## 4. Fuera de alcance
+
+- Inventario / stock real (solo cantidades vendidas y devueltas, sin descontar de un stock).
+- Reportes agregados de ventas por producto/repartidor (vendrán después).
+- Edición de precios congelados en entregas pasadas.
+- Historial de cambios de precio.
+
+## 5. Orden de trabajo
+
+1. Migración (price en products, customer_prices, delivery_items, delivery_returns, payments.delivery_id, helper, RLS, grants).
+2. Server functions (products + driver).
+3. UI productos (precio + dialog overrides).
+4. Rediseño `delivery-sheet` con secciones de venta/devolución/cobro.
+5. Ajustes en `/driver` (botón) y tabs (info extra).
+6. Verificación manual con repartidor.
