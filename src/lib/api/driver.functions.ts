@@ -1,10 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { todayInTZ, tzDayRange } from "@/lib/tz";
 
 function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return todayInTZ();
 }
 
 async function getMyBranch(supabase: any, userId: string): Promise<string> {
@@ -432,16 +432,13 @@ export const listTodayPayments = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
     const today = todayStr();
-    const start = `${today}T00:00:00`;
-    const end = new Date(`${today}T00:00:00`);
-    end.setDate(end.getDate() + 1);
-    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}T00:00:00`;
+    const { startISO, endISO } = tzDayRange(today);
     const { data, error } = await supabase
       .from("payments")
       .select("id, amount, status, method, note, paid_at, customer_id, customers(name)")
       .eq("driver_id", userId)
-      .gte("paid_at", start)
-      .lt("paid_at", endStr)
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO)
       .order("paid_at", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []).map((r: any) => ({

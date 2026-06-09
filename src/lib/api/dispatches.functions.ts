@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
+import { todayInTZ, tzDayRange } from "@/lib/tz";
 
 async function getMyBranch(supabase: any, userId: string): Promise<string> {
   const { data, error } = await supabase
@@ -139,22 +140,15 @@ export const listDispatchesToday = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ date: dateOnly }).parse(d ?? {}))
   .handler(async ({ data, context }) => {
     const branchId = await getMyBranch(context.supabase, context.userId);
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const dateStr = data.date ?? `${yyyy}-${mm}-${dd}`;
-    const start = `${dateStr}T00:00:00`;
-    const endDate = new Date(`${dateStr}T00:00:00`);
-    endDate.setDate(endDate.getDate() + 1);
-    const endStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}T00:00:00`;
+    const dateStr = data.date ?? todayInTZ();
+    const { startISO, endISO } = tzDayRange(dateStr);
 
     const { data: rows, error } = await context.supabase
       .from("dispatches")
       .select("id, dispatched_at, route_id, driver_id, dispatched_by, notes, routes(name), dispatch_items(quantity)")
       .eq("branch_id", branchId)
-      .gte("dispatched_at", start)
-      .lt("dispatched_at", endStr)
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO)
       .order("dispatched_at", { ascending: false });
     if (error) throw new Error(error.message);
 

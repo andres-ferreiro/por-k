@@ -108,7 +108,7 @@ function Page() {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">{r.customer_name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {METHOD_LABEL[r.method]} · {new Date(r.paid_at).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
+                      {METHOD_LABEL[r.method]} · {new Date(r.paid_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: "America/Ciudad_Juarez" })}
                       {r.note ? ` · ${r.note}` : ""}
                     </div>
                   </div>
