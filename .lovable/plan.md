@@ -1,77 +1,104 @@
 
-# Ventas por entrega, precios y devoluciones
+# Páginas faltantes + auditoría por rol
 
-Objetivo: el repartidor deja de "registrar pago suelto". En cada visita captura **productos vendidos** y **productos devueltos**; el sistema calcula el total con el precio del cliente (o global) y crea el cobro automáticamente con efectivo por defecto (puede cambiar a transferencia/crédito/pendiente).
+Hoy hay 5 páginas del panel admin que solo muestran un placeholder, y el dashboard de Inicio tiene "—" en todos los KPIs. Voy a construirlas con datos reales y de paso revisar que cada rol vea lo que le corresponde.
 
-## 1. Base de datos (migración)
+## 1. Páginas a construir (admin: `/app/*`)
 
-**products** — agregar:
-- `price numeric(12,2) not null default 0` (precio global).
+### `/app` — Inicio (dashboard del día)
+KPIs del día (timezone Cd. Juárez), filtrados por sucursal del usuario (owner ve todas):
+- Despachos hoy · unidades cargadas
+- Entregas: entregadas / pendientes / fallidas
+- Ventas del día ($) y unidades vendidas
+- Cobros del día ($) por método (efectivo/transferencia/crédito)
+- Gastos del día ($)
+- **Neto en caja** = cobros efectivo − gastos
+- Lista corta de repartidores activos hoy con su mini-resumen (vendido / cobrado / pendiente)
 
-**customer_prices** (nueva) — precios especiales por cliente:
-- `customer_id`, `product_id` (PK compuesta), `price numeric(12,2) not null`, timestamps.
-- RLS: lectura para staff de la sucursal del cliente + repartidor asignado a una ruta del cliente; escritura para owner/supervisor de la sucursal.
-- Configurable desde la ficha del **producto**: lista de clientes con override de precio.
+### `/app/deliveries` — Entregas
+Tabla con filtros: fecha (default hoy), ruta, repartidor, estado.
+Columnas: hora, cliente, ruta, repartidor, estado, #productos, total $, cobro (método/estado).
+Click en fila → diálogo con detalle (items vendidos, devoluciones, foto, comentario, pago ligado).
+Acceso: owner + supervisor.
 
-**delivery_items** (nueva) — líneas de venta de la entrega:
-- `delivery_id`, `product_id`, `quantity numeric>0`, `unit_price numeric(12,2)` (congelado al guardar), `line_total numeric` (generated `quantity*unit_price`).
-- Único `(delivery_id, product_id)`. RLS espejo de `deliveries`.
+### `/app/payments` — Pagos
+Tabla con filtros: fecha (default hoy), ruta, repartidor, método, estado, origen (venta-entrega vs abono manual).
+Columnas: hora, cliente, ruta, repartidor, monto, método, estado, badge "Venta entrega" si tiene `delivery_id`.
+Totales arriba: total cobrado, por método, pendientes.
+Acceso: owner + supervisor + cashier.
 
-**delivery_returns** (nueva) — devoluciones registradas en la visita:
-- `delivery_id`, `product_id`, `quantity numeric>0`, timestamps. Único `(delivery_id, product_id)`. RLS espejo de `deliveries`.
+### `/app/expenses` — Gastos
+Tabla con filtros: fecha, ruta, repartidor.
+Columnas: fecha, repartidor, ruta, descripción, monto, foto (miniatura).
+Total del periodo arriba.
+Acceso: owner + supervisor + cashier.
 
-**payments** — agregar `delivery_id uuid null` (FK) para enlazar el cobro auto-generado a la entrega; cuando el repartidor edita la entrega, el pago se recalcula/reemplaza.
+### `/app/reports` — Reportes
+Selector de rango (hoy / ayer / últimos 7 / mes actual / custom) + filtros opcionales por ruta/repartidor:
+1. **Ventas por producto** — unidades vendidas, devueltas a clientes, monto $.
+2. **Ventas por repartidor** — vendido $, cobrado $, pendiente $, gastos $, neto.
+3. **Ventas por cliente** — top clientes por monto y visitas.
+4. **Reconciliación del rango** — mismo cálculo `cargado − vendido + devuelto = en camión` agregado al rango (el card diario ya vive en Despacho).
+Botón "Exportar CSV" por cada sección.
+Acceso: owner + supervisor.
 
-Función helper `get_price_for(customer_id, product_id) → numeric` (security definer): regresa `customer_prices.price` si existe, si no `products.price`.
+## 2. Server functions nuevas (`src/lib/api/admin.functions.ts`)
 
-## 2. Server functions
+Todas con `requireSupabaseAuth`, validación zod, scope a `current_branch_id()` salvo owner sin sucursal.
 
-`src/lib/api/products.functions.ts`:
-- `updateProductPrice({id, price})`.
-- `listProductCustomerPrices(productId)` → clientes de la sucursal del owner/supervisor + override actual.
-- `upsertCustomerPrice({product_id, customer_id, price})`, `deleteCustomerPrice(...)`.
+- `getDashboardSummary({ date })`
+- `listDeliveriesAdmin({ date_from, date_to, route_id?, driver_id?, status? })`
+- `getDeliveryDetailAdmin({ id })`
+- `listPaymentsAdmin({ date_from, date_to, route_id?, driver_id?, method?, status?, origin? })`
+- `listExpensesAdmin({ date_from, date_to, route_id?, driver_id? })`
+- `reportSalesByProduct({ date_from, date_to, route_id?, driver_id? })`
+- `reportSalesByDriver({ date_from, date_to })`
+- `reportSalesByCustomer({ date_from, date_to, limit })`
 
-`src/lib/api/driver.functions.ts` — reemplazar `upsertDelivery`:
-- `getCustomerPricedProducts(customerId)` → lista de productos activos con `effective_price` resuelto (override o global). Usado por la hoja de entrega.
-- `saveDeliveryVisit({ customer_id, status, comment, photo_path?, items:[{product_id, quantity}], returns:[{product_id, quantity}], payment:{ method, status } })`:
-  - Upsert `deliveries` (status, comentario, foto).
-  - Reemplaza `delivery_items` y `delivery_returns` (delete + insert) con precios congelados desde `get_price_for`.
-  - Recalcula total = Σ line_total. Si `status='delivered'` y total>0: upsert un único `payments` row con `delivery_id`=esta entrega, `amount=total`, `method`, `status` (paid|pending). Si total=0 o entrega no fue 'delivered': borra el payment ligado.
-- `createPayment` queda solo para abonos manuales sueltos (ej. cliente paga deuda anterior); UI de Pagos sigue funcionando.
+Reusar `tzDayRange` para conversión de fecha local→UTC.
 
-## 3. UI
+## 3. Auditoría de funcionalidad (lo que reviso y corrijo si falla)
 
-### Productos (`/app/products`, owner)
-- Campo **Precio** en alta/edición.
-- Botón "Precios por cliente" en cada producto → dialog con lista de clientes (buscable, agrupados por sucursal) y input de precio; vacío = usa precio global.
+### Cálculos
+- Total entrega = Σ `delivery_items.line_total` (ya está como columna generated). Confirmar.
+- Pago auto-generado solo si `status='delivered'` y total>0. Si el repartidor cambia a fallido, se borra el pago ligado.
+- "Pendientes" = `payments.status='pending'` + entregas entregadas sin pago.
+- Reconciliación: `cargado − vendido + devuelto_clientes = en camión` (negativo = descuadre, marcado en rojo).
+- Neto en caja = Σ `payments where method='cash' and status='paid'` − Σ `expenses`.
 
-### Repartidor — hoja de entrega (`delivery-sheet.tsx`, rediseño)
-Una sola pantalla, scroll vertical, secciones colapsadas:
-1. **Estado**: Entregado (default) / Pendiente / Fallido (igual que hoy).
-2. **Productos vendidos** (visible si Entregado): lista de productos del cliente con precio efectivo; el repartidor pone cantidad con stepper +/−. Muestra subtotal por línea y **Total** grande abajo.
-3. **Devoluciones de ayer** (colapsable, "Agregar devolución"): mismo stepper sobre productos; no afecta total cobrado, solo se registra.
-4. **Cobro** (si Entregado y total>0): chips método (Efectivo default, Transferencia, Crédito, Otro) + toggle Pagado/Pendiente. Muestra "Se cobrará $X".
-5. **Comentario** + **Foto** (igual que hoy).
-6. **Guardar**: una sola acción que persiste todo y crea/actualiza el pago.
+### Acceso por rol (sidebar + rutas)
+Comprobación contra `src/routes/_authenticated/app/route.tsx`:
+- **Owner**: todo.
+- **Supervisor**: todo menos Sucursales/Usuarios/Catálogo.
+- **Cashier**: Inicio, Despacho, Pagos, Gastos. NO Entregas, NO Reportes (configuración actual). → **Lo dejo así** salvo que pidas distinto.
+- **Driver**: redirige a `/driver`, nunca entra a `/app`.
 
-Tarjeta del cliente en `/driver`: el botón "Pago" se reemplaza por "Vender / Entregar" (abre la misma hoja). El FAB "+" en `/driver/payments` queda solo para abonos manuales (cobro de deuda sin entrega del día).
+### Driver app
+Verifico que: pago automático se cree al guardar venta entregada; tabs de entregas/pagos/gastos cargan correctamente; foto sube; devoluciones se guardan; timezone Cd. Juárez en fechas/horas.
 
-### Entregas/Pagos tabs del repartidor
-- Tab entregas: cada fila muestra `#productos · total $X` adicional al status.
-- Tab pagos: badge en pagos auto-generados ("Venta entrega"), tap reabre la hoja de entrega.
+### Despacho
+La reconciliación diaria ya está. Confirmo que cashier la ve.
 
-## 4. Fuera de alcance
+## 4. Detalles técnicos
 
-- Inventario / stock real (solo cantidades vendidas y devueltas, sin descontar de un stock).
-- Reportes agregados de ventas por producto/repartidor (vendrán después).
-- Edición de precios congelados en entregas pasadas.
-- Historial de cambios de precio.
+- Patrón datos: `createServerFn` + `useServerFn` + `useQuery` (no `useEffect` + fetch). Loaders quedan vacíos para evitar fetch en SSR de rutas autenticadas.
+- Fechas con `<Input type="date">` y `todayInTZ()` como default.
+- Tablas con `@/components/ui/table`. Filtros en barra superior.
+- Botones Exportar CSV usan `Blob` + `URL.createObjectURL` en cliente, generados a partir del resultado de la query.
+- Sin nuevas migraciones; toda la data ya existe.
 
-## 5. Orden de trabajo
+## 5. Fuera de alcance
 
-1. Migración (price en products, customer_prices, delivery_items, delivery_returns, payments.delivery_id, helper, RLS, grants).
-2. Server functions (products + driver).
-3. UI productos (precio + dialog overrides).
-4. Rediseño `delivery-sheet` con secciones de venta/devolución/cobro.
-5. Ajustes en `/driver` (botón) y tabs (info extra).
-6. Verificación manual con repartidor.
+- Edición de entregas/pagos/gastos desde admin (solo lectura + ver detalle). El repartidor sigue siendo la fuente.
+- Gráficas (todo en tablas y stat cards por ahora).
+- Reportes por sucursal cruzados para owner multi-sucursal: filtro por sucursal solo si pides explícitamente.
+
+## 6. Orden de trabajo
+
+1. `admin.functions.ts` con las 8 funciones.
+2. `/app` dashboard.
+3. `/app/payments` (más simple, valida patrón).
+4. `/app/expenses`.
+5. `/app/deliveries` + diálogo de detalle.
+6. `/app/reports` con 4 secciones + export CSV.
+7. Recorrido manual: login como cashier, supervisor, owner, driver — confirmar accesos y números.
