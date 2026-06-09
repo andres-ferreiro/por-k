@@ -21,10 +21,11 @@ const fmtNum = (n: number) =>
 
 function Dashboard() {
   const [date, setDate] = useState(todayInTZ());
+  const { branchId } = useBranchScope();
   const fn = useServerFn(getDashboardSummary);
   const { data, isLoading } = useQuery({
-    queryKey: ["dashboard", date],
-    queryFn: () => fn({ data: { date } }),
+    queryKey: ["dashboard", date, branchId],
+    queryFn: () => fn({ data: { date, branch_id: branchId } }),
   });
 
   return (
