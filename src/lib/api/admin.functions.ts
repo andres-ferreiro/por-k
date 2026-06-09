@@ -357,6 +357,7 @@ export const listExpensesAdmin = createServerFn({ method: "POST" })
       .order("expense_date", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (data.branch_id) q = q.eq("branch_id", data.branch_id);
     if (data.route_id) q = q.eq("route_id", data.route_id);
     if (data.driver_id) q = q.eq("driver_id", data.driver_id);
 
