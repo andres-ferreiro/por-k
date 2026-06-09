@@ -4,6 +4,7 @@ import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
+const branchIdField = z.string().uuid().optional().nullable();
 
 async function fetchProfileNames(ids: string[]): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
