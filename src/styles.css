@@ -74,7 +74,8 @@
   --destructive-foreground: oklch(1 0 0);
   /* Border #E1E4EA */
   --border: oklch(0.905 0.008 258);
-  --input: oklch(0.952 0.006 258);
+  --input: oklch(0.905 0.008 258);
+  --input-background: oklch(0.952 0.006 258);
   --ring: oklch(0.273 0.039 263);
   --chart-1: oklch(0.273 0.039 263);
   --chart-2: oklch(0.6 0.118 184);
