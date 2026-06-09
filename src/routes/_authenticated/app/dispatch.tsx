@@ -60,6 +60,7 @@ function DispatchPage() {
         <NewDispatchCard />
         <DailySummaryCard />
       </div>
+      <ReconciliationCard />
     </div>
   );
 }
