@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardSummary } from "@/lib/api/admin.functions";
 import { todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { Truck, PackageCheck, Wallet, Receipt, AlertCircle, Banknote } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app/")({
