@@ -135,14 +135,9 @@ function Page() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button onClick={() => setDeliveryFor(c)} className="h-11">
-                    <PackageCheck className="h-4 w-4" /> Entrega
-                  </Button>
-                  <Button onClick={() => setPaymentFor(c)} variant="secondary" className="h-11">
-                    <Wallet className="h-4 w-4" /> Pago
-                  </Button>
-                </div>
+                <Button onClick={() => setDeliveryFor(c)} className="w-full h-11">
+                  <PackageCheck className="h-4 w-4" /> Vender / Entregar
+                </Button>
               </CardContent>
             </Card>
           );
@@ -153,7 +148,6 @@ function Page() {
         open={!!deliveryFor}
         onOpenChange={(o) => !o && setDeliveryFor(null)}
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
-        initial={deliveryFor?.delivery ?? null}
       />
       <PaymentSheet
         open={!!paymentFor}
@@ -163,3 +157,4 @@ function Page() {
     </div>
   );
 }
+
