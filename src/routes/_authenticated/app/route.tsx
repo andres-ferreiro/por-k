@@ -13,6 +13,8 @@ import {
   Building2, Users, Package, Contact, Route as RouteIcon, Truck,
   PackageCheck, Wallet, Receipt, BarChart3, LogOut, LayoutDashboard,
 } from "lucide-react";
+import { BranchScopeProvider } from "@/lib/branch-scope";
+import { BranchSwitcher } from "@/components/admin/branch-switcher";
 
 export const Route = createFileRoute("/_authenticated/app")({
   loader: async ({ context }) => {
