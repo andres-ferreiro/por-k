@@ -34,7 +34,7 @@ function statusMeta(status?: "pending" | "delivered" | "failed" | null) {
 function Page() {
   const { data, isLoading } = useMyRoute();
   const [deliveryFor, setDeliveryFor] = useState<Customer | null>(null);
-  const [paymentFor, setPaymentFor] = useState<Customer | null>(null);
+
 
   if (isLoading) {
     return (
