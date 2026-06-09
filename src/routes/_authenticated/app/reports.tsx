@@ -68,7 +68,8 @@ function ReportsPage() {
     }
   }
 
-  const filters = { date_from: from, date_to: to, route_id: routeId === "all" ? null : routeId, driver_id: driverId === "all" ? null : driverId };
+  const { branchId } = useBranchScope();
+  const filters = { date_from: from, date_to: to, route_id: routeId === "all" ? null : routeId, driver_id: driverId === "all" ? null : driverId, branch_id: branchId };
 
   const routesFn = useServerFn(listRoutesForDispatch);
   const driversFn = useServerFn(listBranchDrivers);
