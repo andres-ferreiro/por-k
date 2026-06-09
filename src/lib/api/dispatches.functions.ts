@@ -214,3 +214,122 @@ export const getDispatch = createServerFn({ method: "POST" })
       })),
     };
   });
+
+export const getTruckReconciliation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ date: dateOnly }).parse(d ?? {}))
+  .handler(async ({ data, context }) => {
+    const branchId = await getMyBranch(context.supabase, context.userId);
+    const dateStr = data.date ?? todayInTZ();
+    const { startISO, endISO } = tzDayRange(dateStr);
+
+    // 1. Dispatches today (with items + product info)
+    const { data: dispatches, error: dErr } = await context.supabase
+      .from("dispatches")
+      .select("id, route_id, driver_id, routes(name), dispatch_items(product_id, quantity, products(name, unit))")
+      .eq("branch_id", branchId)
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO);
+    if (dErr) throw new Error(dErr.message);
+
+    // 2. Deliveries for that delivery_date in this branch (with items + returns)
+    const { data: deliveries, error: delErr } = await context.supabase
+      .from("deliveries")
+      .select("id, route_id, driver_id, delivery_items(product_id, quantity, products(name, unit)), delivery_returns(product_id, quantity, products(name, unit))")
+      .eq("branch_id", branchId)
+      .eq("delivery_date", dateStr);
+    if (delErr) throw new Error(delErr.message);
+
+    type ProductAgg = {
+      product_id: string;
+      product_name: string | null;
+      unit: string | null;
+      dispatched: number;
+      sold: number;
+      customer_returns: number;
+    };
+    type Group = {
+      key: string;
+      route_id: string;
+      route_name: string | null;
+      driver_id: string;
+      driver_name: string | null;
+      products: Map<string, ProductAgg>;
+    };
+
+    const groups = new Map<string, Group>();
+    const keyOf = (route_id: string, driver_id: string) => `${route_id}::${driver_id}`;
+    const getGroup = (route_id: string, driver_id: string, route_name: string | null): Group => {
+      const k = keyOf(route_id, driver_id);
+      let g = groups.get(k);
+      if (!g) {
+        g = { key: k, route_id, route_name, driver_id, driver_name: null, products: new Map() };
+        groups.set(k, g);
+      } else if (!g.route_name && route_name) {
+        g.route_name = route_name;
+      }
+      return g;
+    };
+    const getProd = (g: Group, product_id: string, name: string | null, unit: string | null) => {
+      let p = g.products.get(product_id);
+      if (!p) {
+        p = { product_id, product_name: name, unit, dispatched: 0, sold: 0, customer_returns: 0 };
+        g.products.set(product_id, p);
+      } else {
+        if (!p.product_name && name) p.product_name = name;
+        if (!p.unit && unit) p.unit = unit;
+      }
+      return p;
+    };
+
+    for (const d of dispatches ?? []) {
+      const g = getGroup(d.route_id as string, d.driver_id as string, (d as any).routes?.name ?? null);
+      for (const it of (d as any).dispatch_items ?? []) {
+        const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
+        p.dispatched += Number(it.quantity ?? 0);
+      }
+    }
+    for (const del of deliveries ?? []) {
+      const g = getGroup(del.route_id as string, del.driver_id as string, null);
+      for (const it of (del as any).delivery_items ?? []) {
+        const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
+        p.sold += Number(it.quantity ?? 0);
+      }
+      for (const it of (del as any).delivery_returns ?? []) {
+        const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
+        p.customer_returns += Number(it.quantity ?? 0);
+      }
+    }
+
+    const allDriverIds = Array.from(groups.values()).map((g) => g.driver_id);
+    const names = await fetchProfileNames(allDriverIds);
+    for (const g of groups.values()) {
+      g.driver_name = names.get(g.driver_id) ?? null;
+    }
+
+    return Array.from(groups.values()).map((g) => {
+      const products = Array.from(g.products.values()).map((p) => ({
+        ...p,
+        on_truck: p.dispatched - p.sold + p.customer_returns,
+      }));
+      products.sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? ""));
+      const totals = products.reduce(
+        (acc, p) => ({
+          dispatched: acc.dispatched + p.dispatched,
+          sold: acc.sold + p.sold,
+          customer_returns: acc.customer_returns + p.customer_returns,
+          on_truck: acc.on_truck + p.on_truck,
+        }),
+        { dispatched: 0, sold: 0, customer_returns: 0, on_truck: 0 },
+      );
+      return {
+        key: g.key,
+        route_id: g.route_id,
+        route_name: g.route_name,
+        driver_id: g.driver_id,
+        driver_name: g.driver_name,
+        products,
+        totals,
+      };
+    }).sort((a, b) => (a.route_name ?? "").localeCompare(b.route_name ?? ""));
+  });
