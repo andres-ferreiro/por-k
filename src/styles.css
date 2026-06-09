@@ -122,14 +122,14 @@
     border-width: 0.5px;
   }
 
-  /* Inputs: focus ring */
+  /* Inputs: focus ring (Stripe-style indigo) */
   input:focus-visible,
   textarea:focus-visible,
   select:focus-visible,
   [data-slot="select-trigger"]:focus-visible {
     background-color: #fff;
-    box-shadow: 0 0 0 3px rgba(30, 45, 71, 0.08);
-    border-color: var(--color-primary);
+    box-shadow: 0 0 0 4px rgba(99, 91, 255, 0.12);
+    border-color: #635BFF;
     outline: none;
   }
 }
