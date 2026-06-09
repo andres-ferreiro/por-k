@@ -8,6 +8,7 @@ import {
   createDispatch,
   listDispatchesToday,
   getDispatch,
+  getTruckReconciliation,
 } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { getMyContext } from "@/lib/api/context.functions";
@@ -59,6 +60,7 @@ function DispatchPage() {
         <NewDispatchCard />
         <DailySummaryCard />
       </div>
+      <ReconciliationCard />
     </div>
   );
 }
@@ -395,5 +397,113 @@ function DispatchDetailDialog({ id, onClose }: { id: string | null; onClose: () 
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ReconciliationCard() {
+  const recFn = useServerFn(getTruckReconciliation);
+  const [date, setDate] = useState<string>(todayStr());
+  const { data, isLoading } = useQuery({
+    queryKey: ["truck-reconciliation", date],
+    queryFn: () => recFn({ data: { date } }),
+  });
+
+  const grandTotals = useMemo(() => {
+    const rows = data ?? [];
+    return rows.reduce(
+      (acc, g) => ({
+        dispatched: acc.dispatched + g.totals.dispatched,
+        sold: acc.sold + g.totals.sold,
+        customer_returns: acc.customer_returns + g.totals.customer_returns,
+        on_truck: acc.on_truck + g.totals.on_truck,
+      }),
+      { dispatched: 0, sold: 0, customer_returns: 0, on_truck: 0 },
+    );
+  }, [data]);
+
+  const fmt = (n: number) =>
+    Number.isInteger(n) ? n.toString() : n.toFixed(2).replace(/\.?0+$/, "");
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="text-base">Reconciliación del camión</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Cargado − vendido + devuelto de clientes = quedó en camión.
+          </p>
+        </div>
+        <Input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value || todayStr())}
+          className="w-40"
+        />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Stat label="Cargado" value={grandTotals.dispatched} />
+          <Stat label="Vendido" value={grandTotals.sold} />
+          <Stat label="Devuelto clientes" value={grandTotals.customer_returns} />
+          <Stat label="En camión" value={grandTotals.on_truck} />
+        </div>
+
+        {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
+        {!isLoading && (data?.length ?? 0) === 0 && (
+          <p className="text-sm text-muted-foreground">Sin movimientos en esta fecha.</p>
+        )}
+
+        <div className="space-y-4">
+          {(data ?? []).map((g) => (
+            <div key={g.key} className="rounded-md border">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 bg-muted/40">
+                <div>
+                  <div className="font-medium">{g.route_name ?? "Ruta"}</div>
+                  <div className="text-xs text-muted-foreground">{g.driver_name ?? "—"}</div>
+                </div>
+                <div className="text-xs tabular-nums text-muted-foreground flex gap-3">
+                  <span>Cargado <b className="text-foreground">{fmt(g.totals.dispatched)}</b></span>
+                  <span>Vendido <b className="text-foreground">{fmt(g.totals.sold)}</b></span>
+                  <span>Devuelto <b className="text-foreground">{fmt(g.totals.customer_returns)}</b></span>
+                  <span>En camión <b className="text-foreground">{fmt(g.totals.on_truck)}</b></span>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr className="border-b">
+                      <th className="text-left font-medium px-3 py-2">Producto</th>
+                      <th className="text-right font-medium px-3 py-2">Cargado</th>
+                      <th className="text-right font-medium px-3 py-2">Vendido</th>
+                      <th className="text-right font-medium px-3 py-2">Dev. clientes</th>
+                      <th className="text-right font-medium px-3 py-2">En camión</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.products.map((p) => {
+                      const negative = p.on_truck < 0;
+                      return (
+                        <tr key={p.product_id} className="border-b last:border-0">
+                          <td className="px-3 py-2 truncate">
+                            {p.product_name ?? p.product_id.slice(0, 8)}
+                            {p.unit ? <span className="text-xs text-muted-foreground ml-1">({p.unit})</span> : null}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmt(p.dispatched)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmt(p.sold)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmt(p.customer_returns)}</td>
+                          <td className={`px-3 py-2 text-right tabular-nums font-medium ${negative ? "text-destructive" : ""}`}>
+                            {fmt(p.on_truck)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
