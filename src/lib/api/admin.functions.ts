@@ -315,6 +315,7 @@ export const listPaymentsAdmin = createServerFn({ method: "POST" })
       .lt("paid_at", endISO)
       .order("paid_at", { ascending: false });
 
+    if (data.branch_id) q = q.eq("branch_id", data.branch_id);
     if (data.route_id) q = q.eq("route_id", data.route_id);
     if (data.driver_id) q = q.eq("driver_id", data.driver_id);
     if (data.method) q = q.eq("method", data.method);
