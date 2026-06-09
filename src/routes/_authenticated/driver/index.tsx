@@ -149,11 +149,7 @@ function Page() {
         onOpenChange={(o) => !o && setDeliveryFor(null)}
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
       />
-      <PaymentSheet
-        open={!!paymentFor}
-        onOpenChange={(o) => !o && setPaymentFor(null)}
-        customer={paymentFor ? { id: paymentFor.id, name: paymentFor.name } : null}
-      />
+
     </div>
   );
 }
