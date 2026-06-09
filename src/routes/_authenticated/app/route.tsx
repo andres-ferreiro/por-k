@@ -143,12 +143,18 @@ function AdminShell() {
         </Sidebar>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-14 flex items-center gap-2 border-b bg-background px-4">
+          <header className="h-14 flex items-center gap-3 border-b bg-background px-4">
             <SidebarTrigger />
-            <div className="text-sm text-muted-foreground">{ctx.branchName ?? "Toda la empresa"}</div>
+            <div className="ml-auto">
+              <BranchScopeProvider>
+                <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
+              </BranchScopeProvider>
+            </div>
           </header>
           <main className="flex-1 p-6 overflow-auto">
-            <Outlet />
+            <BranchScopeProvider>
+              <Outlet />
+            </BranchScopeProvider>
           </main>
         </div>
       </div>
