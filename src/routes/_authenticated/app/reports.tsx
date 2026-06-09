@@ -137,7 +137,7 @@ function ReportsPage() {
   );
 }
 
-type Filters = { date_from: string; date_to: string; route_id: string | null; driver_id: string | null };
+type Filters = { date_from: string; date_to: string; route_id: string | null; driver_id: string | null; branch_id: string | null };
 
 function ByProduct({ filters }: { filters: Filters }) {
   const fn = useServerFn(reportSalesByProduct);
