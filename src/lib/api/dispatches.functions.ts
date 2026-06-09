@@ -217,27 +217,41 @@ export const getDispatch = createServerFn({ method: "POST" })
 
 export const getTruckReconciliation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ date: dateOnly }).parse(d ?? {}))
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateOnly, branch_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
   .handler(async ({ data, context }) => {
-    const branchId = await getMyBranch(context.supabase, context.userId);
+    // Resolve branch: explicit override, else user's own branch.
+    // For owners without their own branch and no override, fall back to no filter.
+    let branchId: string | null = data.branch_id ?? null;
+    if (!branchId) {
+      const { data: prof } = await context.supabase
+        .from("profiles")
+        .select("branch_id")
+        .eq("id", context.userId)
+        .maybeSingle();
+      branchId = (prof?.branch_id as string | null) ?? null;
+    }
     const dateStr = data.date ?? todayInTZ();
     const { startISO, endISO } = tzDayRange(dateStr);
 
     // 1. Dispatches today (with items + product info)
-    const { data: dispatches, error: dErr } = await context.supabase
+    let dq = context.supabase
       .from("dispatches")
-      .select("id, route_id, driver_id, routes(name), dispatch_items(product_id, quantity, products(name, unit))")
-      .eq("branch_id", branchId)
+      .select("id, route_id, driver_id, branch_id, routes(name), dispatch_items(product_id, quantity, products(name, unit))")
       .gte("dispatched_at", startISO)
       .lt("dispatched_at", endISO);
+    if (branchId) dq = dq.eq("branch_id", branchId);
+    const { data: dispatches, error: dErr } = await dq;
     if (dErr) throw new Error(dErr.message);
 
-    // 2. Deliveries for that delivery_date in this branch (with items + returns)
-    const { data: deliveries, error: delErr } = await context.supabase
+    // 2. Deliveries for that delivery_date (with items + returns)
+    let delQ = context.supabase
       .from("deliveries")
-      .select("id, route_id, driver_id, delivery_items(product_id, quantity, products(name, unit)), delivery_returns(product_id, quantity, products(name, unit))")
-      .eq("branch_id", branchId)
+      .select("id, route_id, driver_id, branch_id, delivery_items(product_id, quantity, products(name, unit)), delivery_returns(product_id, quantity, products(name, unit))")
       .eq("delivery_date", dateStr);
+    if (branchId) delQ = delQ.eq("branch_id", branchId);
+    const { data: deliveries, error: delErr } = await delQ;
     if (delErr) throw new Error(delErr.message);
 
     type ProductAgg = {
