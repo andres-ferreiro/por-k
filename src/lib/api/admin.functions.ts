@@ -512,12 +512,16 @@ export const reportSalesByCustomer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => dateRangeSchema.extend({ limit: z.number().int().min(1).max(500).optional() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: dels, error } = await context.supabase
+    let cq = context.supabase
       .from("deliveries")
       .select("id, customer_id, customers(name), delivery_items(line_total)")
       .eq("status", "delivered")
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
+    if (data.branch_id) cq = cq.eq("branch_id", data.branch_id);
+    if (data.route_id) cq = cq.eq("route_id", data.route_id);
+    if (data.driver_id) cq = cq.eq("driver_id", data.driver_id);
+    const { data: dels, error } = await cq;
     if (error) throw new Error(error.message);
 
     type Row = { customer_id: string; customer_name: string | null; visits: number; amount: number };
