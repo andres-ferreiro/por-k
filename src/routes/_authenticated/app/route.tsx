@@ -147,18 +147,15 @@ function AdminShell() {
           <header className="h-14 flex items-center gap-3 border-b bg-background px-4">
             <SidebarTrigger />
             <div className="ml-auto">
-              <BranchScopeProvider>
-                <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
-              </BranchScopeProvider>
+              <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
             </div>
           </header>
           <main className="flex-1 p-6 overflow-auto">
-            <BranchScopeProvider>
-              <Outlet />
-            </BranchScopeProvider>
+            <Outlet />
           </main>
         </div>
       </div>
     </SidebarProvider>
+    </BranchScopeProvider>
   );
 }
