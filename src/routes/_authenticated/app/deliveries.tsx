@@ -20,6 +20,7 @@ import { listDeliveriesAdmin, getDeliveryDetailAdmin } from "@/lib/api/admin.fun
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { downloadCSV } from "@/lib/csv";
 import { Download, Eye } from "lucide-react";
 
@@ -59,8 +60,9 @@ function DeliveriesPage() {
     queryFn: () => driversFn({ data: { branch_id: null } }),
   });
 
+  const { branchId } = useBranchScope();
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["admin", "deliveries", dateFrom, dateTo, routeId, driverId, status],
+    queryKey: ["admin", "deliveries", dateFrom, dateTo, routeId, driverId, status, branchId],
     queryFn: () =>
       listFn({
         data: {
@@ -69,6 +71,7 @@ function DeliveriesPage() {
           route_id: routeId === "all" ? null : routeId,
           driver_id: driverId === "all" ? null : driverId,
           status: status === "all" ? null : (status as any),
+          branch_id: branchId,
         },
       }),
   });

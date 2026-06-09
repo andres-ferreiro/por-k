@@ -17,6 +17,7 @@ import { listPaymentsAdmin } from "@/lib/api/admin.functions";
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { downloadCSV } from "@/lib/csv";
 import { Download } from "lucide-react";
 
@@ -51,8 +52,9 @@ function PaymentsPage() {
     queryFn: () => driversFn({ data: { branch_id: null } }),
   });
 
+  const { branchId } = useBranchScope();
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["admin", "payments", dateFrom, dateTo, routeId, driverId, method, status, origin],
+    queryKey: ["admin", "payments", dateFrom, dateTo, routeId, driverId, method, status, origin, branchId],
     queryFn: () =>
       listFn({
         data: {
@@ -63,6 +65,7 @@ function PaymentsPage() {
           method: method === "all" ? null : (method as any),
           status: status === "all" ? null : (status as any),
           origin: origin === "all" ? null : (origin as any),
+          branch_id: branchId,
         },
       }),
   });

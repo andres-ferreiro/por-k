@@ -13,6 +13,8 @@ import {
   Building2, Users, Package, Contact, Route as RouteIcon, Truck,
   PackageCheck, Wallet, Receipt, BarChart3, LogOut, LayoutDashboard,
 } from "lucide-react";
+import { BranchScopeProvider } from "@/lib/branch-scope";
+import { BranchSwitcher } from "@/components/admin/branch-switcher";
 
 export const Route = createFileRoute("/_authenticated/app")({
   loader: async ({ context }) => {
@@ -84,6 +86,7 @@ function AdminShell() {
   }
 
   return (
+    <BranchScopeProvider>
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-muted/30">
         <Sidebar collapsible="icon">
@@ -141,9 +144,11 @@ function AdminShell() {
         </Sidebar>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-14 flex items-center gap-2 border-b bg-background px-4">
+          <header className="h-14 flex items-center gap-3 border-b bg-background px-4">
             <SidebarTrigger />
-            <div className="text-sm text-muted-foreground">{ctx.branchName ?? "Toda la empresa"}</div>
+            <div className="ml-auto">
+              <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
+            </div>
           </header>
           <main className="flex-1 p-6 overflow-auto">
             <Outlet />
@@ -151,5 +156,6 @@ function AdminShell() {
         </div>
       </div>
     </SidebarProvider>
+    </BranchScopeProvider>
   );
 }

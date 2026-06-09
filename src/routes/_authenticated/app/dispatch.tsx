@@ -13,6 +13,7 @@ import {
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { getMyContext } from "@/lib/api/context.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -403,9 +404,10 @@ function DispatchDetailDialog({ id, onClose }: { id: string | null; onClose: () 
 function ReconciliationCard() {
   const recFn = useServerFn(getTruckReconciliation);
   const [date, setDate] = useState<string>(todayStr());
+  const { branchId } = useBranchScope();
   const { data, isLoading } = useQuery({
-    queryKey: ["truck-reconciliation", date],
-    queryFn: () => recFn({ data: { date } }),
+    queryKey: ["truck-reconciliation", date, branchId],
+    queryFn: () => recFn({ data: { date, branch_id: branchId } }),
   });
 
   const grandTotals = useMemo(() => {

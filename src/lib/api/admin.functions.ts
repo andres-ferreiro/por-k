@@ -4,6 +4,7 @@ import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
+const branchIdField = z.string().uuid().optional().nullable();
 
 async function fetchProfileNames(ids: string[]): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
@@ -20,32 +21,42 @@ async function fetchProfileNames(ids: string[]): Promise<Map<string, string | nu
 export const getDashboardSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ date: dateStr.optional().nullable() }).parse(d ?? {}),
+    z.object({ date: dateStr.optional().nullable(), branch_id: branchIdField }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const date = data.date ?? todayInTZ();
     const { startISO, endISO } = tzDayRange(date);
+    const bid = data.branch_id ?? null;
+
+    let dq = supabase
+      .from("dispatches")
+      .select("id, driver_id, dispatch_items(quantity)")
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO);
+    if (bid) dq = dq.eq("branch_id", bid);
+
+    let delq = supabase
+      .from("deliveries")
+      .select("id, status, driver_id, delivery_items(quantity, line_total)")
+      .eq("delivery_date", date);
+    if (bid) delq = delq.eq("branch_id", bid);
+
+    let pq = supabase
+      .from("payments")
+      .select("id, amount, method, status, driver_id, delivery_id")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO);
+    if (bid) pq = pq.eq("branch_id", bid);
+
+    let eq = supabase
+      .from("expenses")
+      .select("id, amount, driver_id")
+      .eq("expense_date", date);
+    if (bid) eq = eq.eq("branch_id", bid);
 
     const [dispatchesRes, deliveriesRes, paymentsRes, expensesRes] = await Promise.all([
-      supabase
-        .from("dispatches")
-        .select("id, driver_id, dispatch_items(quantity)")
-        .gte("dispatched_at", startISO)
-        .lt("dispatched_at", endISO),
-      supabase
-        .from("deliveries")
-        .select("id, status, driver_id, delivery_items(quantity, line_total)")
-        .eq("delivery_date", date),
-      supabase
-        .from("payments")
-        .select("id, amount, method, status, driver_id, delivery_id")
-        .gte("paid_at", startISO)
-        .lt("paid_at", endISO),
-      supabase
-        .from("expenses")
-        .select("id, amount, driver_id")
-        .eq("expense_date", date),
+      dq, delq, pq, eq,
     ]);
 
     for (const r of [dispatchesRes, deliveriesRes, paymentsRes, expensesRes]) {
@@ -144,6 +155,7 @@ const dateRangeSchema = z.object({
   date_to: dateStr,
   route_id: z.string().uuid().optional().nullable(),
   driver_id: z.string().uuid().optional().nullable(),
+  branch_id: branchIdField,
 });
 
 export const listDeliveriesAdmin = createServerFn({ method: "POST" })
@@ -164,6 +176,7 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
       .order("delivery_date", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (data.branch_id) q = q.eq("branch_id", data.branch_id);
     if (data.route_id) q = q.eq("route_id", data.route_id);
     if (data.driver_id) q = q.eq("driver_id", data.driver_id);
     if (data.status) q = q.eq("status", data.status);
@@ -302,6 +315,7 @@ export const listPaymentsAdmin = createServerFn({ method: "POST" })
       .lt("paid_at", endISO)
       .order("paid_at", { ascending: false });
 
+    if (data.branch_id) q = q.eq("branch_id", data.branch_id);
     if (data.route_id) q = q.eq("route_id", data.route_id);
     if (data.driver_id) q = q.eq("driver_id", data.driver_id);
     if (data.method) q = q.eq("method", data.method);
@@ -343,6 +357,7 @@ export const listExpensesAdmin = createServerFn({ method: "POST" })
       .order("expense_date", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (data.branch_id) q = q.eq("branch_id", data.branch_id);
     if (data.route_id) q = q.eq("route_id", data.route_id);
     if (data.driver_id) q = q.eq("driver_id", data.driver_id);
 
@@ -378,6 +393,7 @@ export const reportSalesByProduct = createServerFn({ method: "POST" })
       .eq("status", "delivered")
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
+    if (data.branch_id) dq = dq.eq("branch_id", data.branch_id);
     if (data.route_id) dq = dq.eq("route_id", data.route_id);
     if (data.driver_id) dq = dq.eq("driver_id", data.driver_id);
 
@@ -421,24 +437,36 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { startISO } = tzDayRange(data.date_from);
     const { endISO } = tzDayRange(data.date_to);
-    const [delsRes, paysRes, expsRes] = await Promise.all([
-      context.supabase
-        .from("deliveries")
-        .select("driver_id, status, delivery_items(line_total)")
-        .gte("delivery_date", data.date_from)
-        .lte("delivery_date", data.date_to)
-        .eq("status", "delivered"),
-      context.supabase
-        .from("payments")
-        .select("driver_id, amount, status")
-        .gte("paid_at", startISO)
-        .lt("paid_at", endISO),
-      context.supabase
-        .from("expenses")
-        .select("driver_id, amount")
-        .gte("expense_date", data.date_from)
-        .lte("expense_date", data.date_to),
-    ]);
+    const bid = data.branch_id ?? null;
+    let delQ = context.supabase
+      .from("deliveries")
+      .select("driver_id, status, delivery_items(line_total)")
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to)
+      .eq("status", "delivered");
+    if (bid) delQ = delQ.eq("branch_id", bid);
+    if (data.route_id) delQ = delQ.eq("route_id", data.route_id);
+    if (data.driver_id) delQ = delQ.eq("driver_id", data.driver_id);
+
+    let payQ = context.supabase
+      .from("payments")
+      .select("driver_id, amount, status")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO);
+    if (bid) payQ = payQ.eq("branch_id", bid);
+    if (data.route_id) payQ = payQ.eq("route_id", data.route_id);
+    if (data.driver_id) payQ = payQ.eq("driver_id", data.driver_id);
+
+    let expQ = context.supabase
+      .from("expenses")
+      .select("driver_id, amount")
+      .gte("expense_date", data.date_from)
+      .lte("expense_date", data.date_to);
+    if (bid) expQ = expQ.eq("branch_id", bid);
+    if (data.route_id) expQ = expQ.eq("route_id", data.route_id);
+    if (data.driver_id) expQ = expQ.eq("driver_id", data.driver_id);
+
+    const [delsRes, paysRes, expsRes] = await Promise.all([delQ, payQ, expQ]);
     for (const r of [delsRes, paysRes, expsRes]) if (r.error) throw new Error(r.error.message);
 
     type Row = {
@@ -484,12 +512,16 @@ export const reportSalesByCustomer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => dateRangeSchema.extend({ limit: z.number().int().min(1).max(500).optional() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: dels, error } = await context.supabase
+    let cq = context.supabase
       .from("deliveries")
       .select("id, customer_id, customers(name), delivery_items(line_total)")
       .eq("status", "delivered")
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
+    if (data.branch_id) cq = cq.eq("branch_id", data.branch_id);
+    if (data.route_id) cq = cq.eq("route_id", data.route_id);
+    if (data.driver_id) cq = cq.eq("driver_id", data.driver_id);
+    const { data: dels, error } = await cq;
     if (error) throw new Error(error.message);
 
     type Row = { customer_id: string; customer_name: string | null; visits: number; amount: number };

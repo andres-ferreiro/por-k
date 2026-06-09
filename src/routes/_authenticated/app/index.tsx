@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardSummary } from "@/lib/api/admin.functions";
 import { todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { Truck, PackageCheck, Wallet, Receipt, AlertCircle, Banknote } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app/")({
@@ -20,10 +21,11 @@ const fmtNum = (n: number) =>
 
 function Dashboard() {
   const [date, setDate] = useState(todayInTZ());
+  const { branchId } = useBranchScope();
   const fn = useServerFn(getDashboardSummary);
   const { data, isLoading } = useQuery({
-    queryKey: ["dashboard", date],
-    queryFn: () => fn({ data: { date } }),
+    queryKey: ["dashboard", date, branchId],
+    queryFn: () => fn({ data: { date, branch_id: branchId } }),
   });
 
   return (
