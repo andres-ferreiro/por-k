@@ -403,9 +403,10 @@ function DispatchDetailDialog({ id, onClose }: { id: string | null; onClose: () 
 function ReconciliationCard() {
   const recFn = useServerFn(getTruckReconciliation);
   const [date, setDate] = useState<string>(todayStr());
+  const { branchId } = useBranchScope();
   const { data, isLoading } = useQuery({
-    queryKey: ["truck-reconciliation", date],
-    queryFn: () => recFn({ data: { date } }),
+    queryKey: ["truck-reconciliation", date, branchId],
+    queryFn: () => recFn({ data: { date, branch_id: branchId } }),
   });
 
   const grandTotals = useMemo(() => {
