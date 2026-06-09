@@ -21,32 +21,42 @@ async function fetchProfileNames(ids: string[]): Promise<Map<string, string | nu
 export const getDashboardSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ date: dateStr.optional().nullable() }).parse(d ?? {}),
+    z.object({ date: dateStr.optional().nullable(), branch_id: branchIdField }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const date = data.date ?? todayInTZ();
     const { startISO, endISO } = tzDayRange(date);
+    const bid = data.branch_id ?? null;
+
+    let dq = supabase
+      .from("dispatches")
+      .select("id, driver_id, dispatch_items(quantity)")
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO);
+    if (bid) dq = dq.eq("branch_id", bid);
+
+    let delq = supabase
+      .from("deliveries")
+      .select("id, status, driver_id, delivery_items(quantity, line_total)")
+      .eq("delivery_date", date);
+    if (bid) delq = delq.eq("branch_id", bid);
+
+    let pq = supabase
+      .from("payments")
+      .select("id, amount, method, status, driver_id, delivery_id")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO);
+    if (bid) pq = pq.eq("branch_id", bid);
+
+    let eq = supabase
+      .from("expenses")
+      .select("id, amount, driver_id")
+      .eq("expense_date", date);
+    if (bid) eq = eq.eq("branch_id", bid);
 
     const [dispatchesRes, deliveriesRes, paymentsRes, expensesRes] = await Promise.all([
-      supabase
-        .from("dispatches")
-        .select("id, driver_id, dispatch_items(quantity)")
-        .gte("dispatched_at", startISO)
-        .lt("dispatched_at", endISO),
-      supabase
-        .from("deliveries")
-        .select("id, status, driver_id, delivery_items(quantity, line_total)")
-        .eq("delivery_date", date),
-      supabase
-        .from("payments")
-        .select("id, amount, method, status, driver_id, delivery_id")
-        .gte("paid_at", startISO)
-        .lt("paid_at", endISO),
-      supabase
-        .from("expenses")
-        .select("id, amount, driver_id")
-        .eq("expense_date", date),
+      dq, delq, pq, eq,
     ]);
 
     for (const r of [dispatchesRes, deliveriesRes, paymentsRes, expensesRes]) {
