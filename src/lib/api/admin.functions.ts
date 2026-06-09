@@ -437,7 +437,6 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { startISO } = tzDayRange(data.date_from);
     const { endISO } = tzDayRange(data.date_to);
-    const [delsRes, paysRes, expsRes] = await Promise.all([
     const bid = data.branch_id ?? null;
     let delQ = context.supabase
       .from("deliveries")
