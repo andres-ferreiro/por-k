@@ -6,9 +6,9 @@ import { getMyRouteToday } from "@/lib/api/driver.functions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, Phone, CheckCircle2, Clock, XCircle, PackageCheck, Wallet, Loader2 } from "lucide-react";
+import { MapPin, Phone, CheckCircle2, Clock, XCircle, PackageCheck, Loader2 } from "lucide-react";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
-import { PaymentSheet } from "@/components/driver/payment-sheet";
+
 
 export const Route = createFileRoute("/_authenticated/driver/")({
   component: Page,
