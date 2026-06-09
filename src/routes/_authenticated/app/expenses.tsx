@@ -44,8 +44,9 @@ function ExpensesPage() {
     queryFn: () => driversFn({ data: { branch_id: null } }),
   });
 
+  const { branchId } = useBranchScope();
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["admin", "expenses", dateFrom, dateTo, routeId, driverId],
+    queryKey: ["admin", "expenses", dateFrom, dateTo, routeId, driverId, branchId],
     queryFn: () =>
       listFn({
         data: {
@@ -53,6 +54,7 @@ function ExpensesPage() {
           date_to: dateTo,
           route_id: routeId === "all" ? null : routeId,
           driver_id: driverId === "all" ? null : driverId,
+          branch_id: branchId,
         },
       }),
   });
