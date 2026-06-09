@@ -20,6 +20,7 @@ import { listDeliveriesAdmin, getDeliveryDetailAdmin } from "@/lib/api/admin.fun
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
+import { useBranchScope } from "@/lib/branch-scope";
 import { downloadCSV } from "@/lib/csv";
 import { Download, Eye } from "lucide-react";
 
