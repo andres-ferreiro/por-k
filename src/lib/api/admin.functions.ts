@@ -393,6 +393,7 @@ export const reportSalesByProduct = createServerFn({ method: "POST" })
       .eq("status", "delivered")
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
+    if (data.branch_id) dq = dq.eq("branch_id", data.branch_id);
     if (data.route_id) dq = dq.eq("route_id", data.route_id);
     if (data.driver_id) dq = dq.eq("driver_id", data.driver_id);
 
