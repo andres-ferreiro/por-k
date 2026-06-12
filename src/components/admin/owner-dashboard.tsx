@@ -323,7 +323,7 @@ export function OwnerDashboard({
                 <Line
                   type="monotone"
                   dataKey="previous"
-                  stroke="hsl(var(--chart-1))"
+                  stroke="hsl(var(--chart-2))"
                   strokeWidth={1.5}
                   strokeDasharray="4 3"
                   strokeOpacity={0.35}
