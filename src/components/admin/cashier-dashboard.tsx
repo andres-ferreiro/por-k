@@ -8,7 +8,6 @@ import { DeltaBadge } from "@/components/admin/delta-badge";
 import { PageHeader } from "@/components/admin/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardSummary, listPaymentsAdmin } from "@/lib/api/admin.functions";
-import { listDispatchesToday } from "@/lib/api/dispatches.functions";
 import { fmtMoney, fmtQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -68,7 +67,6 @@ export function CashierDashboard() {
   // ── server functions ────────────────────────────────────────────────────
   const summaryFn = useServerFn(getDashboardSummary);
   const paymentsFn = useServerFn(listPaymentsAdmin);
-  const dispatchesFn = useServerFn(listDispatchesToday);
 
   // ── queries ─────────────────────────────────────────────────────────────
   const { data: cur } = useQuery({
@@ -108,17 +106,6 @@ export function CashierDashboard() {
       }),
   });
 
-  const { data: dispatches } = useQuery({
-    queryKey: ["dashboard", "cashier", "dispatches", currentRange.from, branchId],
-    queryFn: () =>
-      dispatchesFn({
-        data: {
-          date: currentRange.from,
-          branch_id: branchId,
-        },
-      }),
-  });
-
   // ── derived values ───────────────────────────────────────────────────────
   const curPending =
     (cur?.payments.pendingAmount ?? 0) + (cur?.payments.byMethod["credit"] ?? 0);
@@ -135,7 +122,6 @@ export function CashierDashboard() {
   }));
 
   const pendingRows = (pendingPays ?? []).slice(0, 10);
-  const dispatchRows = (dispatches ?? []).slice(0, 10);
 
   // ── render ───────────────────────────────────────────────────────────────
   return (
@@ -271,61 +257,27 @@ export function CashierDashboard() {
           </CardContent>
         </Card>
 
-        {/* Dispatches */}
+        {/* Despachos del período */}
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Despachos del período</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm">Despachos del período</CardTitle>
+            <Link to="/app/dispatch" className="text-xs text-primary hover:underline">Ver todos →</Link>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40 text-muted-foreground">
-                    <th className="px-4 py-2.5 text-left font-medium">Ruta</th>
-                    <th className="px-4 py-2.5 text-left font-medium">Repartidor</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Unidades</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Hora</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dispatchRows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="px-4 py-8 text-center text-muted-foreground"
-                      >
-                        Sin despachos para el período.
-                      </td>
-                    </tr>
-                  ) : (
-                    dispatchRows.map((d) => (
-                      <tr key={d.id} className="border-b last:border-0 hover:bg-muted/20">
-                        <td className="px-4 py-2.5 truncate max-w-[120px]">
-                          {d.route_name ?? "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-muted-foreground truncate max-w-[120px]">
-                          {d.driver_name ?? "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">
-                          {fmtQty(d.total_units)}
-                        </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">
-                          {new Date(d.dispatched_at).toLocaleTimeString("es-MX", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-4 py-3 border-t text-sm">
-              <Link to="/app/dispatch" className="text-primary hover:underline">
-                Ver todos →
-              </Link>
-            </div>
+          <CardContent>
+            {(cur?.dispatches.count ?? 0) === 0 ? (
+              <p className="text-sm text-muted-foreground">Sin despachos en el período.</p>
+            ) : (
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between py-2 border-b">
+                  <span className="text-muted-foreground">Total despachos</span>
+                  <span className="font-semibold tabular-nums">{cur?.dispatches.count ?? 0}</span>
+                </div>
+                <div className="flex justify-between py-2">
+                  <span className="text-muted-foreground">Unidades cargadas</span>
+                  <span className="font-semibold tabular-nums">{fmtQty(cur?.dispatches.units ?? 0)}</span>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

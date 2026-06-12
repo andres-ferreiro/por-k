@@ -18,9 +18,11 @@ function Dashboard() {
     staleTime: Infinity,
   });
 
-  const role = ctx?.primaryRole;
+  if (!ctx) return null;
 
-  if (role === "owner") return <OwnerDashboard roles={ctx!.roles} ownBranchName={ctx!.branchName} />;
+  const role = ctx.primaryRole;
+
+  if (role === "owner") return <OwnerDashboard roles={ctx.roles} ownBranchName={ctx.branchName} />;
   if (role === "supervisor") return <SupervisorDashboard />;
   return <CashierDashboard />;
 }

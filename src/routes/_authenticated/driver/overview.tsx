@@ -141,7 +141,7 @@ function Page() {
   const totalSold = delivered.reduce((s, r) => s + r.total, 0);
   const totalReturned = delivered.reduce((s, r) => s + (r.return_amount ?? 0), 0);
   const totalExpenses = exps.reduce((s, e) => s + e.amount, 0);
-  const saldoALiquidar = totalSold - totalReturned - totalExpenses;
+  const saldoALiquidar = totalSold - totalExpenses;  // totalSold is already net-of-returns
 
   const totalPaid = pays.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0);
 

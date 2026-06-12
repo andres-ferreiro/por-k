@@ -187,7 +187,7 @@ export const getDailyTotals = createServerFn({ method: "POST" })
 
     let delQ = supabase
       .from("deliveries")
-      .select("delivery_date, status, delivery_items(line_total)")
+      .select("delivery_date, status, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)")
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
     if (bid) delQ = delQ.eq("branch_id", bid);
@@ -220,7 +220,9 @@ export const getDailyTotals = createServerFn({ method: "POST" })
       if ((row as any).status === "delivered") {
         entry.delivered += 1;
         const items = (row as any).delivery_items ?? [];
-        entry.sold += items.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0);
+        const returns = (row as any).delivery_returns ?? [];
+        const { netAmount } = deliveryNetTotals(items, returns);
+        entry.sold += netAmount;
       } else if ((row as any).status === "failed") {
         entry.failed += 1;
       } else {
@@ -555,7 +557,7 @@ export const reportSalesByProduct = createServerFn({ method: "POST" })
         r.units_sold += Number(i.quantity ?? 0);
         r.amount += Number(i.line_total ?? 0);
       }
-      const prices = new Map(
+      const prices = new Map<string, number>(
         items.map((i: any) => [i.product_id as string, Number(i.line_total ?? 0) / Number(i.quantity || 1)]),
       );
       for (const i of returns) {
@@ -721,7 +723,7 @@ export const clearDayMovements = createServerFn({ method: "POST" })
     const branchId = data.branch_id;
 
     async function deleteCount(table: string, apply: (q: any) => any) {
-      let q = supabaseAdmin.from(table).delete({ count: "exact" });
+      let q = (supabaseAdmin as any).from(table).delete({ count: "exact" });
       q = apply(q);
       const { error, count } = await q;
       if (error) throw new Error(error.message);
