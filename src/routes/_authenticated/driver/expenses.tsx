@@ -24,7 +24,7 @@ function Page() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["driver", "expensesToday"],
-    queryFn: () => fetcher(),
+    queryFn: () => fetcher({ data: {} }),
   });
 
   useEffect(() => {

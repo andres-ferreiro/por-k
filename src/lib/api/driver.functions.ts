@@ -443,21 +443,29 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
     return { ok: true, delivery_id: deliveryId, total };
   });
 
-export const listTodayDeliveries = createServerFn({ method: "GET" })
+export const listTodayDeliveries = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({
+      date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const today = todayStr();
-    const { data, error } = await supabase
+    const from = data.date_from ?? todayStr();
+    const to = data.date_to ?? from;
+    const { data: rows, error } = await supabase
       .from("deliveries")
       .select(
-        "id, status, comment, photo_url, customer_id, updated_at, customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
+        "id, status, comment, photo_url, customer_id, delivery_date, updated_at, customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
       )
       .eq("driver_id", userId)
-      .eq("delivery_date", today)
+      .gte("delivery_date", from)
+      .lte("delivery_date", to)
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => {
+    return (rows ?? []).map((r: any) => {
       const items = (r.delivery_items ?? []) as Array<{
         product_id: string;
         quantity: number;
@@ -469,13 +477,14 @@ export const listTodayDeliveries = createServerFn({ method: "GET" })
       return {
         id: r.id as string,
         status: r.status as "pending" | "delivered" | "failed",
-        comment: r.comment as string | null,
-        photo_url: r.photo_url as string | null,
+        comment: (r.comment as string | null) ?? null,
+        photo_url: (r.photo_url as string | null) ?? null,
         customer_id: r.customer_id as string,
-        customer_name: r.customers?.name ?? null,
-        updated_at: r.updated_at as string,
-        total: totals.netAmount,
+        customer_name: (r.customers?.name as string | null) ?? null,
+        delivery_date: r.delivery_date as string,
         units: totals.netUnits,
+        total: totals.netAmount,
+        return_amount: totals.returnAmount,
       };
     });
   });
@@ -536,13 +545,21 @@ export const deletePayment = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export const listTodayPayments = createServerFn({ method: "GET" })
+export const listTodayPayments = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({
+      date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const today = todayStr();
-    const { startISO, endISO } = tzDayRange(today);
-    const { data, error } = await supabase
+    const from = data.date_from ?? todayStr();
+    const to = data.date_to ?? from;
+    const { startISO } = tzDayRange(from);
+    const { endISO } = tzDayRange(to);
+    const { data: rows, error } = await supabase
       .from("payments")
       .select(
         "id, amount, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
@@ -552,7 +569,7 @@ export const listTodayPayments = createServerFn({ method: "GET" })
       .lt("paid_at", endISO)
       .order("paid_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => {
+    return (rows ?? []).map((r: any) => {
       const items = (r.deliveries?.delivery_items ?? []) as Array<{
         product_id: string;
         quantity: number;
@@ -565,10 +582,10 @@ export const listTodayPayments = createServerFn({ method: "GET" })
         amount: deliveryPaymentAmount(Number(r.amount), items, returns),
         status: r.status as "paid" | "pending",
         method: r.method as "cash" | "transfer" | "credit" | "other",
-        note: r.note as string | null,
+        note: (r.note as string | null) ?? null,
         paid_at: r.paid_at as string,
         customer_id: r.customer_id as string,
-        customer_name: r.customers?.name ?? null,
+        customer_name: (r.customers?.name as string | null) ?? null,
       };
     });
   });
@@ -625,23 +642,32 @@ export const deleteExpense = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export const listTodayExpenses = createServerFn({ method: "GET" })
+export const listTodayExpenses = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({
+      date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const today = todayStr();
-    const { data, error } = await supabase
+    const from = data.date_from ?? todayStr();
+    const to = data.date_to ?? from;
+    const { data: rows, error } = await supabase
       .from("expenses")
       .select("id, amount, description, photo_url, expense_date, created_at")
       .eq("driver_id", userId)
-      .eq("expense_date", today)
+      .gte("expense_date", from)
+      .lte("expense_date", to)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => ({
+    return (rows ?? []).map((r: any) => ({
       id: r.id as string,
       amount: Number(r.amount),
       description: r.description as string,
-      photo_url: r.photo_url as string | null,
+      photo_url: (r.photo_url as string | null) ?? null,
+      expense_date: r.expense_date as string,
       created_at: r.created_at as string,
     }));
   });
