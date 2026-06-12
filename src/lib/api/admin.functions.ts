@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { todayInTZ, tzDayRange } from "@/lib/tz";
+import { tzDayRange } from "@/lib/tz";
+import { deliveryNetTotals } from "@/lib/delivery-totals";
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
 const branchIdField = z.string().uuid().optional().nullable();
@@ -21,12 +22,16 @@ async function fetchProfileNames(ids: string[]): Promise<Map<string, string | nu
 export const getDashboardSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ date: dateStr.optional().nullable(), branch_id: branchIdField }).parse(d ?? {}),
+    z.object({
+      date_from: dateStr,
+      date_to: dateStr,
+      branch_id: branchIdField,
+    }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const date = data.date ?? todayInTZ();
-    const { startISO, endISO } = tzDayRange(date);
+    const { startISO } = tzDayRange(data.date_from);
+    const { endISO } = tzDayRange(data.date_to);
     const bid = data.branch_id ?? null;
 
     let dq = supabase
@@ -38,8 +43,11 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
 
     let delq = supabase
       .from("deliveries")
-      .select("id, status, driver_id, delivery_items(quantity, line_total)")
-      .eq("delivery_date", date);
+      .select(
+        "id, status, driver_id, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
+      )
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to);
     if (bid) delq = delq.eq("branch_id", bid);
 
     let pq = supabase
@@ -52,7 +60,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     let eq = supabase
       .from("expenses")
       .select("id, amount, driver_id")
-      .eq("expense_date", date);
+      .gte("expense_date", data.date_from)
+      .lte("expense_date", data.date_to);
     if (bid) eq = eq.eq("branch_id", bid);
 
     const [dispatchesRes, deliveriesRes, paymentsRes, expensesRes] = await Promise.all([
@@ -77,56 +86,70 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     const delivered = deliveries.filter((d: any) => d.status === "delivered");
     const pendingDel = deliveries.filter((d: any) => d.status === "pending").length;
     const failedDel = deliveries.filter((d: any) => d.status === "failed").length;
-    const soldUnits = delivered.reduce(
-      (a: number, d: any) =>
-        a + (d.delivery_items ?? []).reduce((x: number, i: any) => x + Number(i.quantity ?? 0), 0),
-      0,
-    );
-    const soldAmount = delivered.reduce(
-      (a: number, d: any) =>
-        a + (d.delivery_items ?? []).reduce((x: number, i: any) => x + Number(i.line_total ?? 0), 0),
-      0,
-    );
+
+    let soldUnits = 0;
+    let soldAmount = 0;
+    const deliveryNetById = new Map<string, number>();
+    for (const d of delivered) {
+      const totals = deliveryNetTotals(
+        (d as any).delivery_items ?? [],
+        (d as any).delivery_returns ?? [],
+      );
+      soldUnits += totals.netUnits;
+      soldAmount += totals.netAmount;
+      deliveryNetById.set((d as any).id, totals.netAmount);
+    }
+
+    const paymentAmount = (p: any) =>
+      p.delivery_id && deliveryNetById.has(p.delivery_id)
+        ? deliveryNetById.get(p.delivery_id)!
+        : Number(p.amount ?? 0);
 
     const paid = payments.filter((p: any) => p.status === "paid");
-    const collectedTotal = paid.reduce((a: number, p: any) => a + Number(p.amount ?? 0), 0);
+    const collectedTotal = paid.reduce((a: number, p: any) => a + paymentAmount(p), 0);
     const byMethod: Record<string, number> = { cash: 0, transfer: 0, credit: 0, other: 0 };
-    for (const p of paid) byMethod[p.method] = (byMethod[p.method] ?? 0) + Number(p.amount ?? 0);
+    for (const p of paid) byMethod[p.method] = (byMethod[p.method] ?? 0) + paymentAmount(p);
     const pendingAmount = payments
       .filter((p: any) => p.status === "pending")
-      .reduce((a: number, p: any) => a + Number(p.amount ?? 0), 0);
+      .reduce((a: number, p: any) => a + paymentAmount(p), 0);
 
     const expenseTotal = expenses.reduce((a: number, e: any) => a + Number(e.amount ?? 0), 0);
     const cashNet = (byMethod.cash ?? 0) - expenseTotal;
 
-    // Per-driver mini summary
     const driverIds = new Set<string>();
     for (const x of [...dispatches, ...deliveries, ...payments, ...expenses]) driverIds.add((x as any).driver_id);
     const names = await fetchProfileNames(Array.from(driverIds));
 
-    const perDriver = new Map<string, { id: string; name: string | null; sold: number; collected: number; pending: number }>();
+    const perDriver = new Map<string, { id: string; name: string | null; sold: number; collected: number; pending: number; failed: number }>();
     const ensure = (id: string) => {
       let v = perDriver.get(id);
       if (!v) {
-        v = { id, name: names.get(id) ?? null, sold: 0, collected: 0, pending: 0 };
+        v = { id, name: names.get(id) ?? null, sold: 0, collected: 0, pending: 0, failed: 0 };
         perDriver.set(id, v);
       }
       return v;
     };
-    for (const d of delivered) {
+    for (const d of deliveries) {
       const v = ensure((d as any).driver_id);
-      v.sold += ((d as any).delivery_items ?? []).reduce(
-        (x: number, i: any) => x + Number(i.line_total ?? 0), 0,
-      );
+      if ((d as any).status === "delivered") {
+        const totals = deliveryNetTotals(
+          (d as any).delivery_items ?? [],
+          (d as any).delivery_returns ?? [],
+        );
+        v.sold += totals.netAmount;
+      }
+      if ((d as any).status === "failed") v.failed += 1;
     }
     for (const p of payments) {
       const v = ensure((p as any).driver_id);
-      if (p.status === "paid") v.collected += Number(p.amount ?? 0);
-      else v.pending += Number(p.amount ?? 0);
+      const amt = paymentAmount(p);
+      if (p.status === "paid") v.collected += amt;
+      else v.pending += amt;
     }
 
     return {
-      date,
+      date_from: data.date_from,
+      date_to: data.date_to,
       dispatches: { count: dispatches.length, units: dispatchUnits },
       deliveries: {
         total: deliveries.length,
@@ -146,6 +169,74 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       cashNet,
       drivers: Array.from(perDriver.values()).sort((a, b) => b.sold - a.sold),
     };
+  });
+
+export const getDailyTotals = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date_from: dateStr, date_to: dateStr, branch_id: branchIdField }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const { startISO } = tzDayRange(data.date_from);
+    const { endISO } = tzDayRange(data.date_to);
+    const bid = data.branch_id ?? null;
+
+    let delQ = supabase
+      .from("deliveries")
+      .select("delivery_date, status, delivery_items(line_total)")
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to);
+    if (bid) delQ = delQ.eq("branch_id", bid);
+
+    let payQ = supabase
+      .from("payments")
+      .select("paid_at, amount, status, delivery_id, deliveries(delivery_items(line_total))")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO)
+      .eq("status", "paid");
+    if (bid) payQ = payQ.eq("branch_id", bid);
+
+    const [delRes, payRes] = await Promise.all([delQ, payQ]);
+    if (delRes.error) throw new Error(delRes.error.message);
+    if (payRes.error) throw new Error(payRes.error.message);
+
+    // Build date spine (one entry per calendar day in range)
+    const spine = new Map<string, { date: string; sold: number; collected: number; delivered: number; failed: number; pending: number }>();
+    const cur = new Date(data.date_from + "T12:00:00Z");
+    const end = new Date(data.date_to + "T12:00:00Z");
+    while (cur <= end) {
+      const d = cur.toISOString().slice(0, 10);
+      spine.set(d, { date: d, sold: 0, collected: 0, delivered: 0, failed: 0, pending: 0 });
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+
+    for (const row of delRes.data ?? []) {
+      const entry = spine.get((row as any).delivery_date as string);
+      if (!entry) continue;
+      if ((row as any).status === "delivered") {
+        entry.delivered += 1;
+        const items = (row as any).delivery_items ?? [];
+        entry.sold += items.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0);
+      } else if ((row as any).status === "failed") {
+        entry.failed += 1;
+      } else {
+        entry.pending += 1;
+      }
+    }
+
+    for (const row of payRes.data ?? []) {
+      const dateKey = ((row as any).paid_at as string).slice(0, 10);
+      const entry = spine.get(dateKey);
+      if (!entry) continue;
+      const items = (row as any).deliveries?.delivery_items ?? [];
+      const total = items.length > 0
+        ? items.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0)
+        : Number((row as any).amount ?? 0);
+      entry.collected += total;
+    }
+
+    return Array.from(spine.values());
   });
 
 // ============ DELIVERIES ============
@@ -169,7 +260,7 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
     let q = context.supabase
       .from("deliveries")
       .select(
-        "id, delivery_date, created_at, status, comment, route_id, driver_id, customer_id, routes(name), customers(name), delivery_items(quantity, line_total), delivery_returns(quantity), payments(id, amount, method, status, delivery_id)",
+        "id, delivery_date, created_at, status, comment, route_id, driver_id, customer_id, routes(name), customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, method, status, delivery_id)",
       )
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to)
@@ -188,11 +279,12 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
     const names = await fetchProfileNames(driverIds);
 
     return (rows ?? []).map((r: any) => {
-      const items = (r.delivery_items ?? []) as { quantity: number; line_total: number }[];
-      const returns = (r.delivery_returns ?? []) as { quantity: number }[];
-      const total = items.reduce((a, i) => a + Number(i.line_total ?? 0), 0);
-      const units = items.reduce((a, i) => a + Number(i.quantity ?? 0), 0);
-      const returnUnits = returns.reduce((a, i) => a + Number(i.quantity ?? 0), 0);
+      const items = (r.delivery_items ?? []) as { product_id: string; quantity: number; unit_price: number; line_total: number }[];
+      const returns = (r.delivery_returns ?? []) as { product_id: string; quantity: number }[];
+      const totals = deliveryNetTotals(items, returns);
+      const total = totals.netAmount;
+      const units = totals.netUnits;
+      const returnUnits = totals.returnUnits;
       const pay = (r.payments ?? []).find((p: any) => p.delivery_id === r.id) ?? null;
       return {
         id: r.id as string,
@@ -212,7 +304,7 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
         total,
         payment: pay
           ? {
-              amount: Number(pay.amount),
+              amount: totals.netAmount,
               method: pay.method as string,
               status: pay.status as "paid" | "pending",
             }
@@ -254,6 +346,24 @@ export const getDeliveryDetailAdmin = createServerFn({ method: "POST" })
 
     const names = await fetchProfileNames([(del as any).driver_id]);
 
+    const items = (itemsRes.data ?? []).map((i: any) => ({
+      id: i.id,
+      product_id: i.product_id as string,
+      product_name: i.products?.name ?? null,
+      unit: i.products?.unit ?? null,
+      quantity: Number(i.quantity),
+      unit_price: Number(i.unit_price),
+      line_total: Number(i.line_total),
+    }));
+    const returns = (retRes.data ?? []).map((i: any) => ({
+      id: i.id,
+      product_id: i.product_id as string,
+      product_name: i.products?.name ?? null,
+      unit: i.products?.unit ?? null,
+      quantity: Number(i.quantity),
+    }));
+    const totals = deliveryNetTotals(items, returns);
+
     return {
       id: del.id as string,
       delivery_date: del.delivery_date as string,
@@ -264,24 +374,13 @@ export const getDeliveryDetailAdmin = createServerFn({ method: "POST" })
       driver_name: names.get((del as any).driver_id) ?? null,
       customer_name: (del as any).customers?.name ?? null,
       customer_address: (del as any).customers?.address ?? null,
-      items: (itemsRes.data ?? []).map((i: any) => ({
-        id: i.id,
-        product_name: i.products?.name ?? null,
-        unit: i.products?.unit ?? null,
-        quantity: Number(i.quantity),
-        unit_price: Number(i.unit_price),
-        line_total: Number(i.line_total),
-      })),
-      returns: (retRes.data ?? []).map((i: any) => ({
-        id: i.id,
-        product_name: i.products?.name ?? null,
-        unit: i.products?.unit ?? null,
-        quantity: Number(i.quantity),
-      })),
+      items,
+      returns,
+      totals,
       payment: payRes.data
         ? {
             id: (payRes.data as any).id,
-            amount: Number((payRes.data as any).amount),
+            amount: totals.netAmount,
             method: (payRes.data as any).method as string,
             status: (payRes.data as any).status as string,
             paid_at: (payRes.data as any).paid_at as string,
@@ -326,11 +425,32 @@ export const listPaymentsAdmin = createServerFn({ method: "POST" })
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
 
+    const deliveryIds = Array.from(
+      new Set((rows ?? []).map((r: any) => r.delivery_id).filter(Boolean)),
+    ) as string[];
+    const deliveryNetById = new Map<string, number>();
+    if (deliveryIds.length > 0) {
+      const { data: dels, error: dErr } = await context.supabase
+        .from("deliveries")
+        .select("id, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)")
+        .in("id", deliveryIds);
+      if (dErr) throw new Error(dErr.message);
+      for (const d of dels ?? []) {
+        const totals = deliveryNetTotals(
+          (d as any).delivery_items ?? [],
+          (d as any).delivery_returns ?? [],
+        );
+        deliveryNetById.set(d.id as string, totals.netAmount);
+      }
+    }
+
     const names = await fetchProfileNames((rows ?? []).map((r: any) => r.driver_id));
 
     return (rows ?? []).map((r: any) => ({
       id: r.id as string,
-      amount: Number(r.amount),
+      amount: r.delivery_id
+        ? deliveryNetById.get(r.delivery_id as string) ?? Number(r.amount)
+        : Number(r.amount),
       method: r.method as string,
       status: r.status as "paid" | "pending",
       paid_at: r.paid_at as string,
@@ -418,14 +538,21 @@ export const reportSalesByProduct = createServerFn({ method: "POST" })
       return r;
     };
     for (const d of dels ?? []) {
-      for (const i of (d as any).delivery_items ?? []) {
+      const items = (d as any).delivery_items ?? [];
+      const returns = (d as any).delivery_returns ?? [];
+      for (const i of items) {
         const r = get(i.product_id, i.products?.name ?? null, i.products?.unit ?? null);
         r.units_sold += Number(i.quantity ?? 0);
         r.amount += Number(i.line_total ?? 0);
       }
-      for (const i of (d as any).delivery_returns ?? []) {
+      const prices = new Map(
+        items.map((i: any) => [i.product_id as string, Number(i.line_total ?? 0) / Number(i.quantity || 1)]),
+      );
+      for (const i of returns) {
         const r = get(i.product_id, i.products?.name ?? null, i.products?.unit ?? null);
         r.units_returned += Number(i.quantity ?? 0);
+        const unitPrice = prices.get(i.product_id as string) ?? 0;
+        r.amount -= Number(i.quantity ?? 0) * unitPrice;
       }
     }
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
@@ -440,7 +567,9 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
     const bid = data.branch_id ?? null;
     let delQ = context.supabase
       .from("deliveries")
-      .select("driver_id, status, delivery_items(line_total)")
+      .select(
+        "id, driver_id, status, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
+      )
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to)
       .eq("status", "delivered");
@@ -450,7 +579,7 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
 
     let payQ = context.supabase
       .from("payments")
-      .select("driver_id, amount, status")
+      .select("driver_id, amount, status, delivery_id")
       .gte("paid_at", startISO)
       .lt("paid_at", endISO);
     if (bid) payQ = payQ.eq("branch_id", bid);
@@ -487,14 +616,24 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
       }
       return r;
     };
+    const deliveryNetById = new Map<string, number>();
     for (const d of delsRes.data ?? []) {
       const r = get((d as any).driver_id);
-      r.sold += ((d as any).delivery_items ?? []).reduce((a: number, i: any) => a + Number(i.line_total ?? 0), 0);
+      const totals = deliveryNetTotals(
+        (d as any).delivery_items ?? [],
+        (d as any).delivery_returns ?? [],
+      );
+      deliveryNetById.set((d as any).id, totals.netAmount);
+      r.sold += totals.netAmount;
     }
     for (const p of paysRes.data ?? []) {
       const r = get((p as any).driver_id);
-      if ((p as any).status === "paid") r.collected += Number((p as any).amount ?? 0);
-      else r.pending += Number((p as any).amount ?? 0);
+      const amt =
+        (p as any).delivery_id && deliveryNetById.has((p as any).delivery_id)
+          ? deliveryNetById.get((p as any).delivery_id)!
+          : Number((p as any).amount ?? 0);
+      if ((p as any).status === "paid") r.collected += amt;
+      else r.pending += amt;
     }
     for (const e of expsRes.data ?? []) {
       const r = get((e as any).driver_id);
@@ -514,7 +653,9 @@ export const reportSalesByCustomer = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     let cq = context.supabase
       .from("deliveries")
-      .select("id, customer_id, customers(name), delivery_items(line_total)")
+      .select(
+        "id, customer_id, customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
+      )
       .eq("status", "delivered")
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
@@ -534,10 +675,65 @@ export const reportSalesByCustomer = createServerFn({ method: "POST" })
         map.set(id, r);
       }
       r.visits += 1;
-      r.amount += ((d as any).delivery_items ?? []).reduce(
-        (a: number, i: any) => a + Number(i.line_total ?? 0), 0,
+      const totals = deliveryNetTotals(
+        (d as any).delivery_items ?? [],
+        (d as any).delivery_returns ?? [],
       );
+      r.amount += totals.netAmount;
     }
     const rows = Array.from(map.values()).sort((a, b) => b.amount - a.amount);
     return data.limit ? rows.slice(0, data.limit) : rows;
+  });
+
+// ============ TEST / RESET ============
+
+async function assertOwner(supabase: any, userId: string) {
+  const { data, error } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "owner")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Solo el propietario puede limpiar movimientos.");
+}
+
+export const clearDayMovements = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateStr, branch_id: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertOwner(context.supabase, context.userId);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { startISO, endISO } = tzDayRange(data.date);
+    const branchId = data.branch_id;
+
+    async function deleteCount(table: string, apply: (q: any) => any) {
+      let q = supabaseAdmin.from(table).delete({ count: "exact" });
+      q = apply(q);
+      const { error, count } = await q;
+      if (error) throw new Error(error.message);
+      return count ?? 0;
+    }
+
+    const payments = await deleteCount("payments", (q) =>
+      q.eq("branch_id", branchId).gte("paid_at", startISO).lt("paid_at", endISO),
+    );
+    const deliveries = await deleteCount("deliveries", (q) =>
+      q.eq("branch_id", branchId).eq("delivery_date", data.date),
+    );
+    const expenses = await deleteCount("expenses", (q) =>
+      q.eq("branch_id", branchId).eq("expense_date", data.date),
+    );
+    const dispatches = await deleteCount("dispatches", (q) =>
+      q.eq("branch_id", branchId).gte("dispatched_at", startISO).lt("dispatched_at", endISO),
+    );
+
+    return {
+      date: data.date,
+      branch_id: branchId,
+      deleted: { payments, deliveries, expenses, dispatches },
+    };
   });
