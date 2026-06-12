@@ -1,11 +1,14 @@
+import { Add01Icon, Delete02Icon, Download01Icon, Edit01Icon, MapPinIcon, Upload01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import {
-  listCustomers, createCustomer, updateCustomer, deleteCustomer,
+  listCustomers, createCustomer, updateCustomer, deleteCustomer, bulkCreateCustomers,
   getCustomerPhotoUploadUrl, getCustomerPhotoViewUrls,
 } from "@/lib/api/customers.functions";
+import { parseCSV } from "@/lib/csv";
 import { getMyContext } from "@/lib/api/context.functions";
 import { listBranches } from "@/lib/api/branches.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,8 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -22,9 +23,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, MapPin, Upload } from "lucide-react";
+
 import { toast } from "sonner";
 import { LocationPicker } from "@/components/location-picker";
+import { useBranchScope } from "@/lib/branch-scope";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterByBranch, filterBySearch, filterByActive } from "@/lib/table-utils";
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  FilterSelect, StatusFilterSelect,
+} from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/app/customers")({
   component: CustomersPage,
@@ -54,7 +62,6 @@ function CustomersPage() {
   const list = useServerFn(listCustomers);
   const ctxFn = useServerFn(getMyContext);
   const listB = useServerFn(listBranches);
-  const getViews = useServerFn(getCustomerPhotoViewUrls);
 
   const { data: ctx } = useQuery({ queryKey: ["myContext"], queryFn: () => ctxFn() });
   const { data: customers, isLoading } = useQuery({ queryKey: ["customers"], queryFn: () => list() });
@@ -64,19 +71,15 @@ function CustomersPage() {
     enabled: ctx?.primaryRole === "owner",
   });
 
-  const photoPaths = useMemo(
-    () => (customers ?? []).map((c) => extractPath(c.photo_url)).filter((p): p is string => !!p),
-    [customers],
-  );
-  const { data: photoUrls } = useQuery({
-    queryKey: ["customer-photo-urls", photoPaths],
-    queryFn: () => getViews({ data: { paths: photoPaths } }),
-    enabled: photoPaths.length > 0,
-  });
-
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [deleting, setDeleting] = useState<Customer | null>(null);
+  const [search, setSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const { branchId } = useBranchScope();
+  const { sortKey, sortDir, toggle, sort } = useSorting("name");
 
   const qc = useQueryClient();
   const del = useServerFn(deleteCustomer);
@@ -92,79 +95,114 @@ function CustomersPage() {
 
   const isOwner = ctx?.primaryRole === "owner";
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
-          <p className="text-muted-foreground">Gestiona los clientes de tu sucursal.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> Nuevo cliente
-        </Button>
-      </div>
+  const rows = useMemo(() => {
+    let scoped = filterByBranch(customers ?? [], branchId);
+    scoped = filterBySearch(scoped, search, (c) =>
+      [c.name, c.phone, c.address, c.branch_name].filter(Boolean).join(" "),
+    );
+    scoped = filterByActive(scoped, statusFilter as "all" | "active" | "inactive");
+    if (locationFilter === "with") scoped = scoped.filter((c) => c.lat != null && c.lng != null);
+    if (locationFilter === "without") scoped = scoped.filter((c) => c.lat == null || c.lng == null);
+    return sort(scoped, (c, key) => {
+      if (key === "location") return c.lat != null && c.lng != null ? 1 : 0;
+      return (c as Record<string, unknown>)[key];
+    });
+  }, [customers, branchId, search, locationFilter, statusFilter, sort]);
 
-      <Card>
+  const colSpan = isOwner ? 6 : 5;
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Clientes"
+        description="Gestiona los clientes de tu sucursal."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Icon icon={Upload01Icon} className="h-4 w-4 mr-1" /> Importar CSV
+            </Button>
+            <Button onClick={() => { setEditing(null); setOpen(true); }}>
+              <Icon icon={Add01Icon} className="h-4 w-4 mr-1" /> Nuevo cliente
+            </Button>
+          </div>
+        }
+      />
+
+      <TableToolbar
+        search
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar clientes…"
+        filters={
+          <>
+            <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
+            <FilterSelect value={locationFilter} onValueChange={setLocationFilter} placeholder="Ubicación">
+              <SelectItem value="all">Todas</SelectItem>
+              <SelectItem value="with">Con mapa</SelectItem>
+              <SelectItem value="without">Sin mapa</SelectItem>
+            </FilterSelect>
+          </>
+        }
+      />
+
+      <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-16" />
-              <TableHead>Nombre</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>Dirección</TableHead>
-              <TableHead>Ubicación</TableHead>
-              {isOwner && <TableHead>Sucursal</TableHead>}
+              <SortableTableHead label="Nombre" sortKey="name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Teléfono" sortKey="phone" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Dirección" sortKey="address" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Ubicación" sortKey="location" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              {isOwner && (
+                <SortableTableHead label="Sucursal" sortKey="branch_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              )}
               <TableHead className="w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && (
-              <TableRow><TableCell colSpan={isOwner ? 7 : 6} className="text-center text-muted-foreground py-8">Cargando…</TableCell></TableRow>
+            <TableStatusRow colSpan={colSpan} loading={isLoading} />
+            {!isLoading && rows.length === 0 && (
+              <TableStatusRow colSpan={colSpan} empty emptyMessage="Aún no hay clientes." />
             )}
-            {!isLoading && (customers?.length ?? 0) === 0 && (
-              <TableRow><TableCell colSpan={isOwner ? 7 : 6} className="text-center text-muted-foreground py-8">Aún no hay clientes.</TableCell></TableRow>
-            )}
-            {(customers ?? []).map((c) => {
-              const path = extractPath(c.photo_url);
-              const img = path && photoUrls ? photoUrls[path] : undefined;
-              return (
+            {rows.map((c) => (
                 <TableRow key={c.id}>
-                  <TableCell>
-                    <Avatar className="h-9 w-9">
-                      {img && <AvatarImage src={img} alt={c.name} />}
-                      <AvatarFallback>{c.name.slice(0, 1).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                  </TableCell>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell>{c.phone ?? "—"}</TableCell>
                   <TableCell className="max-w-[260px] truncate">{c.address ?? "—"}</TableCell>
                   <TableCell>
                     {c.lat != null && c.lng != null
-                      ? <span className="inline-flex items-center gap-1 text-sm"><MapPin className="h-3.5 w-3.5" /> Sí</span>
+                      ? <span className="inline-flex items-center gap-1 text-sm"><Icon icon={MapPinIcon} className="h-3.5 w-3.5" /> Sí</span>
                       : <span className="text-muted-foreground text-sm">—</span>}
                   </TableCell>
                   {isOwner && <TableCell>{c.branch_name ?? "—"}</TableCell>}
                   <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="icon" onClick={() => { setEditing(c as Customer); setOpen(true); }}>
-                        <Pencil className="h-4 w-4" />
+                        <Icon icon={Edit01Icon} className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => setDeleting(c as Customer)}>
-                        <Trash2 className="h-4 w-4" />
+                        <Icon icon={Delete02Icon} className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
                 </TableRow>
-              );
-            })}
+            ))}
           </TableBody>
         </Table>
-      </Card>
+      </DataTableCard>
 
       <CustomerDialog
         open={open}
         onOpenChange={setOpen}
         editing={editing}
+        isOwner={isOwner}
+        branches={branches ?? []}
+        defaultBranchId={ctx?.branchId ?? null}
+      />
+
+      <CustomerImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
         isOwner={isOwner}
         branches={branches ?? []}
         defaultBranchId={ctx?.branchId ?? null}
@@ -187,6 +225,264 @@ function CustomersPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+interface ImportRow {
+  line: number;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  notes: string | null;
+  error: string | null;
+}
+
+function pickField(row: Record<string, string>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k]?.trim();
+    if (v) return v;
+  }
+  return "";
+}
+
+function parseOptionalNumber(value: string, min: number, max: number, label: string): number | null | string {
+  if (!value.trim()) return null;
+  const n = Number(value.replace(",", "."));
+  if (Number.isNaN(n)) return `${label} no es un número válido`;
+  if (n < min || n > max) return `${label} debe estar entre ${min} y ${max}`;
+  return n;
+}
+
+function parseCustomerImportRows(text: string): ImportRow[] {
+  return parseCSV(text).map((row, i) => {
+    const line = i + 2;
+    const name = pickField(row, "nombre", "name");
+    const phone = pickField(row, "telefono", "phone", "teléfono") || null;
+    const address = pickField(row, "direccion", "address", "dirección") || null;
+    const notes = pickField(row, "notas", "notes") || null;
+
+    const latRaw = pickField(row, "latitud", "lat");
+    const lngRaw = pickField(row, "longitud", "lng", "lon");
+    const latResult = parseOptionalNumber(latRaw, -90, 90, "Latitud");
+    const lngResult = parseOptionalNumber(lngRaw, -180, 180, "Longitud");
+
+    let error: string | null = null;
+    if (!name) error = "El nombre es obligatorio";
+    else if (typeof latResult === "string") error = latResult;
+    else if (typeof lngResult === "string") error = lngResult;
+
+    return {
+      line,
+      name,
+      phone,
+      address,
+      lat: typeof latResult === "number" ? latResult : null,
+      lng: typeof lngResult === "number" ? lngResult : null,
+      notes,
+      error,
+    };
+  });
+}
+
+function CustomerImportDialog({
+  open, onOpenChange, isOwner, branches, defaultBranchId,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  isOwner: boolean;
+  branches: { id: string; name: string }[];
+  defaultBranchId: string | null;
+}) {
+  const qc = useQueryClient();
+  const bulkCreate = useServerFn(bulkCreateCustomers);
+
+  const [branchId, setBranchId] = useState("");
+  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setBranchId(defaultBranchId ?? "");
+    setRows([]);
+    setFileName(null);
+  }, [open, defaultBranchId]);
+
+  const validRows = rows.filter((r) => !r.error);
+  const invalidCount = rows.length - validRows.length;
+
+  const mut = useMutation({
+    mutationFn: () => bulkCreate({
+      data: {
+        branch_id: isOwner ? branchId || null : null,
+        import_label: fileName,
+        customers: validRows.map((r) => ({
+          name: r.name,
+          phone: r.phone,
+          address: r.address,
+          lat: r.lat,
+          lng: r.lng,
+          notes: r.notes,
+        })),
+      },
+    }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["customer-import-batches"] });
+      const skipped = invalidCount;
+      toast.success(
+        skipped > 0
+          ? `${result.count} clientes importados (${skipped} filas omitidas)`
+          : `${result.count} clientes importados`,
+      );
+      onOpenChange(false);
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Error al importar"),
+  });
+
+  async function handleFile(file: File) {
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Selecciona un archivo CSV.");
+      return;
+    }
+    try {
+      const text = await file.text();
+      const parsed = parseCustomerImportRows(text);
+      if (!parsed.length) {
+        toast.error("El archivo no contiene filas de datos.");
+        return;
+      }
+      setRows(parsed);
+      setFileName(file.name);
+    } catch {
+      toast.error("No se pudo leer el archivo.");
+    }
+  }
+
+  const canImport = validRows.length > 0 && (!isOwner || !!branchId) && !mut.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:overflow-hidden">
+        <div className="shrink-0 px-6 pt-6">
+          <DialogHeader>
+            <DialogTitle>Importar clientes desde CSV</DialogTitle>
+            <DialogDescription>
+              Solo el nombre es obligatorio. Las demás columnas son opcionales.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+          <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-2">
+            <p className="font-medium">Columnas del archivo</p>
+            <p className="text-muted-foreground text-xs">
+              <code className="text-foreground">nombre</code> (obligatorio),{" "}
+              <code className="text-foreground">telefono</code>,{" "}
+              <code className="text-foreground">direccion</code>,{" "}
+              <code className="text-foreground">latitud</code>,{" "}
+              <code className="text-foreground">longitud</code>,{" "}
+              <code className="text-foreground">notas</code>
+            </p>
+            <a
+              href="/samples/clientes-ejemplo.csv"
+              download="clientes-ejemplo.csv"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              <Icon icon={Download01Icon} className="h-3.5 w-3.5" />
+              Descargar archivo de ejemplo
+            </a>
+          </div>
+
+          {isOwner && (
+            <div className="space-y-1.5">
+              <Label>Sucursal</Label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger><SelectValue placeholder="Selecciona una sucursal" /></SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label>Archivo CSV</Label>
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <Button type="button" variant="outline" size="sm" asChild>
+                <span>
+                  <Icon icon={Upload01Icon} className="mr-1 h-4 w-4" />
+                  {fileName ?? "Seleccionar archivo"}
+                </span>
+              </Button>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFile(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+
+          {rows.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span>{validRows.length} filas válidas</span>
+                {invalidCount > 0 && (
+                  <span className="text-destructive">{invalidCount} con errores (se omitirán)</span>
+                )}
+              </div>
+              <div className="max-h-64 overflow-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">#</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Teléfono</TableHead>
+                      <TableHead>Dirección</TableHead>
+                      <TableHead>Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((r) => (
+                      <TableRow key={r.line} className={r.error ? "bg-destructive/5" : undefined}>
+                        <TableCell className="text-muted-foreground text-xs">{r.line}</TableCell>
+                        <TableCell className="font-medium">{r.name || "—"}</TableCell>
+                        <TableCell>{r.phone ?? "—"}</TableCell>
+                        <TableCell className="max-w-[180px] truncate">{r.address ?? "—"}</TableCell>
+                        <TableCell className="text-xs">
+                          {r.error
+                            ? <span className="text-destructive">{r.error}</span>
+                            : <span className="text-muted-foreground">OK</span>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t px-6 py-4">
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+            <Button onClick={() => mut.mutate()} disabled={!canImport}>
+              {mut.isPending
+                ? "Importando…"
+                : validRows.length
+                  ? `Importar ${validRows.length} clientes`
+                  : "Importar"}
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -284,13 +580,17 @@ function CustomerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
-          <DialogDescription>Datos de contacto, foto y ubicación en mapa.</DialogDescription>
-        </DialogHeader>
+      <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:overflow-hidden">
+        <div className="shrink-0 px-6 pt-6">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
+            <DialogDescription>
+              Datos de contacto, foto de referencia y ubicación en mapa.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
 
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Nombre</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Teléfono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
@@ -309,34 +609,40 @@ function CustomerDialog({
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label>Foto</Label>
-            <div className="flex items-center gap-3">
-              <Avatar className="h-16 w-16">
-                {photoPreview && <AvatarImage src={photoPreview} />}
-                <AvatarFallback>{name.slice(0, 1).toUpperCase() || "C"}</AvatarFallback>
-              </Avatar>
-              <div>
-                <label className="inline-flex items-center gap-2 cursor-pointer">
-                  <Button type="button" variant="outline" size="sm" asChild>
-                    <span>
-                      <Upload className="h-4 w-4 mr-1" />
-                      {uploading ? "Subiendo…" : photoPath ? "Cambiar foto" : "Subir foto"}
-                    </span>
-                  </Button>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleFile(f);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
+          <div className="space-y-2">
+            <Label>Foto de referencia</Label>
+            <p className="text-xs text-muted-foreground">
+              Foto del local, fachada o punto de referencia para la entrega.
+            </p>
+            {photoPreview ? (
+              <img
+                src={photoPreview}
+                alt="Foto de referencia"
+                className="aspect-video w-full max-w-sm rounded-md border object-cover"
+              />
+            ) : (
+              <div className="flex aspect-video w-full max-w-sm items-center justify-center rounded-md border border-dashed bg-muted/40 text-sm text-muted-foreground">
+                Sin foto
               </div>
-            </div>
+            )}
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <Button type="button" variant="outline" size="sm" asChild>
+                <span>
+                  <Icon icon={Upload01Icon} className="mr-1 h-4 w-4" />
+                  {uploading ? "Subiendo…" : photoPath ? "Cambiar foto" : "Subir foto"}
+                </span>
+              </Button>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFile(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
           </div>
 
           <div className="space-y-1.5">
@@ -344,6 +650,7 @@ function CustomerDialog({
             <LocationPicker
               value={{ lat, lng }}
               onChange={(v) => { setLat(v.lat); setLng(v.lng); }}
+              onAddressSelect={setAddress}
             />
           </div>
 
@@ -353,12 +660,14 @@ function CustomerDialog({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => mut.mutate()} disabled={!name || mut.isPending || uploading}>
-            {mut.isPending ? "Guardando…" : "Guardar"}
-          </Button>
-        </DialogFooter>
+        <div className="shrink-0 border-t px-6 py-4">
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+            <Button onClick={() => mut.mutate()} disabled={!name || mut.isPending || uploading}>
+              {mut.isPending ? "Guardando…" : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

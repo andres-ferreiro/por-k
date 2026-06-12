@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { tzDayRange } from "@/lib/tz";
+import { todayInTZ, tzDayRange } from "@/lib/tz";
 import { deliveryNetTotals } from "@/lib/delivery-totals";
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
@@ -23,15 +23,18 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z.object({
-      date_from: dateStr,
-      date_to: dateStr,
+      date_from: dateStr.optional().nullable(),
+      date_to: dateStr.optional().nullable(),
       branch_id: branchIdField,
     }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    const { startISO } = tzDayRange(data.date_from);
-    const { endISO } = tzDayRange(data.date_to);
+    const today = todayInTZ();
+    const dateFrom = data.date_from ?? today;
+    const dateTo = data.date_to ?? today;
+    const { startISO } = tzDayRange(dateFrom);
+    const { endISO } = tzDayRange(dateTo);
     const bid = data.branch_id ?? null;
 
     let dq = supabase
@@ -46,8 +49,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       .select(
         "id, status, driver_id, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
       )
-      .gte("delivery_date", data.date_from)
-      .lte("delivery_date", data.date_to);
+      .gte("delivery_date", dateFrom)
+      .lte("delivery_date", dateTo);
     if (bid) delq = delq.eq("branch_id", bid);
 
     let pq = supabase
@@ -60,8 +63,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     let eq = supabase
       .from("expenses")
       .select("id, amount, driver_id")
-      .gte("expense_date", data.date_from)
-      .lte("expense_date", data.date_to);
+      .gte("expense_date", dateFrom)
+      .lte("expense_date", dateTo);
     if (bid) eq = eq.eq("branch_id", bid);
 
     const [dispatchesRes, deliveriesRes, paymentsRes, expensesRes] = await Promise.all([
@@ -148,8 +151,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     }
 
     return {
-      date_from: data.date_from,
-      date_to: data.date_to,
+      date_from: dateFrom,
+      date_to: dateTo,
       dispatches: { count: dispatches.length, units: dispatchUnits },
       deliveries: {
         total: deliveries.length,
@@ -225,10 +228,17 @@ export const getDailyTotals = createServerFn({ method: "POST" })
       }
     }
 
+    // Build per-day ISO boundaries for correct timezone bucketing
+    const dayBoundaries = Array.from(spine.keys()).map((date) => {
+      const { startISO, endISO } = tzDayRange(date);
+      return { date, startISO, endISO };
+    });
+
     for (const row of payRes.data ?? []) {
-      const dateKey = ((row as any).paid_at as string).slice(0, 10);
-      const entry = spine.get(dateKey);
-      if (!entry) continue;
+      const paidAt = (row as any).paid_at as string;
+      const day = dayBoundaries.find((b) => paidAt >= b.startISO && paidAt < b.endISO);
+      if (!day) continue;
+      const entry = spine.get(day.date)!;
       const items = (row as any).deliveries?.delivery_items ?? [];
       const total = items.length > 0
         ? items.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0)

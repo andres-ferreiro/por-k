@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
+import { deliveryNetTotals, deliveryPaymentAmount } from "@/lib/delivery-totals";
 
 function todayStr(): string {
   return todayInTZ();
@@ -16,6 +17,72 @@ async function getMyBranch(supabase: any, userId: string): Promise<string> {
   if (error) throw new Error(error.message);
   if (!data?.branch_id) throw new Error("Tu cuenta no tiene sucursal asignada.");
   return data.branch_id as string;
+}
+
+async function getTodayDispatchForRoute(
+  supabase: any,
+  routeId: string,
+  driverId: string,
+  today: string,
+) {
+  const { startISO, endISO } = tzDayRange(today);
+  const { data, error } = await supabase
+    .from("dispatches")
+    .select("id, dispatched_at")
+    .eq("route_id", routeId)
+    .eq("driver_id", driverId)
+    .gte("dispatched_at", startISO)
+    .lt("dispatched_at", endISO)
+    .order("dispatched_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as { id: string; dispatched_at: string } | null;
+}
+
+async function requireTodayDispatch(
+  supabase: any,
+  routeId: string,
+  driverId: string,
+  today: string,
+) {
+  const dispatch = await getTodayDispatchForRoute(supabase, routeId, driverId, today);
+  if (!dispatch) {
+    throw new Error("Tu ruta aún no está habilitada. Espera a que registren el despacho del día.");
+  }
+  return dispatch;
+}
+
+async function branchRequiresDispatch(supabase: any, branchId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("branches")
+    .select("require_dispatch_before_route")
+    .eq("id", branchId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.require_dispatch_before_route ?? true;
+}
+
+async function branchDriverLocationEnabled(supabase: any, branchId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("branches")
+    .select("driver_location_enabled")
+    .eq("id", branchId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.driver_location_enabled ?? false;
+}
+
+async function requireTodayDispatchIfEnabled(
+  supabase: any,
+  routeId: string,
+  driverId: string,
+  branchId: string,
+  today: string,
+) {
+  const required = await branchRequiresDispatch(supabase, branchId);
+  if (!required) return null;
+  return requireTodayDispatch(supabase, routeId, driverId, today);
 }
 
 // ============ MY ROUTE ============
@@ -37,8 +104,12 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
     if (rErr) throw new Error(rErr.message);
     const route = (routes ?? [])[0] as any;
     if (!route) {
-      return { route: null, customers: [], date: today };
+      return { route: null, customers: [], date: today, dispatch: null, require_dispatch: true, can_work: false };
     }
+
+    const dispatch = await getTodayDispatchForRoute(supabase, route.id, userId, today);
+    const requireDispatch = await branchRequiresDispatch(supabase, route.branch_id as string);
+    const driverLocationEnabled = await branchDriverLocationEnabled(supabase, route.branch_id as string);
 
     const { data: rc, error: rcErr } = await supabase
       .from("route_customers")
@@ -91,6 +162,12 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
         branch_id: route.branch_id as string,
         branch_name: route.branches?.name ?? null,
       },
+      dispatch: dispatch
+        ? { id: dispatch.id, dispatched_at: dispatch.dispatched_at }
+        : null,
+      require_dispatch: requireDispatch,
+      can_work: !requireDispatch || !!dispatch,
+      driver_location_enabled: driverLocationEnabled,
       customers,
     };
   });
@@ -123,6 +200,8 @@ export const upsertDelivery = createServerFn({ method: "POST" })
     if (rErr) throw new Error(rErr.message);
     const route = (routes ?? [])[0] as any;
     if (!route) throw new Error("No tienes una ruta asignada.");
+
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
 
     const { data: rc, error: rcErr } = await supabase
       .from("route_customers")
@@ -162,9 +241,10 @@ export const getCustomerPricedProducts = createServerFn({ method: "POST" })
     const { supabase } = context;
     const { data: products, error: pErr } = await supabase
       .from("products")
-      .select("id, name, unit, price")
+      .select("id, name, unit, price, allow_returns")
       .eq("is_active", true)
-      .order("name");
+      .order("display_order", { ascending: true })
+      .order("name", { ascending: true });
     if (pErr) throw new Error(pErr.message);
     const { data: overrides, error: oErr } = await supabase
       .from("customer_prices")
@@ -179,6 +259,7 @@ export const getCustomerPricedProducts = createServerFn({ method: "POST" })
       base_price: Number(p.price),
       effective_price: ov.has(p.id) ? (ov.get(p.id) as number) : Number(p.price),
       has_override: ov.has(p.id),
+      allow_returns: Boolean(p.allow_returns),
     }));
   });
 
@@ -249,6 +330,8 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
     const route = (routes ?? [])[0] as any;
     if (!route) throw new Error("No tienes una ruta asignada.");
 
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
+
     const { data: rc, error: rcErr } = await supabase
       .from("route_customers").select("customer_id")
       .eq("route_id", route.id).eq("customer_id", data.customer_id).maybeSingle();
@@ -276,14 +359,19 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
     if (dErr) throw new Error(dErr.message);
     const deliveryId = del.id as string;
 
-    // Resolve prices for all item products
-    const itemProductIds = data.items.map((i) => i.product_id);
+    // Resolve prices for sold and returned products
+    const allProductIds = Array.from(
+      new Set([
+        ...data.items.map((i) => i.product_id),
+        ...data.returns.map((r) => r.product_id),
+      ]),
+    );
     const priceMap = new Map<string, number>();
-    if (itemProductIds.length > 0) {
+    if (allProductIds.length > 0) {
       const [{ data: prods, error: pErr }, { data: ov, error: oErr }] = await Promise.all([
-        supabase.from("products").select("id, price").in("id", itemProductIds),
+        supabase.from("products").select("id, price").in("id", allProductIds),
         supabase.from("customer_prices").select("product_id, price")
-          .eq("customer_id", data.customer_id).in("product_id", itemProductIds),
+          .eq("customer_id", data.customer_id).in("product_id", allProductIds),
       ]);
       if (pErr) throw new Error(pErr.message);
       if (oErr) throw new Error(oErr.message);
@@ -313,6 +401,18 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       const { error: retErr } = await supabase.from("delivery_returns").insert(rows);
       if (retErr) throw new Error(retErr.message);
     }
+
+    const itemLines = data.items.map((i) => ({
+      product_id: i.product_id,
+      quantity: i.quantity,
+      unit_price: priceMap.get(i.product_id) ?? 0,
+    }));
+    const returnLines = data.returns.map((r) => ({
+      product_id: r.product_id,
+      quantity: r.quantity,
+      unit_price: priceMap.get(r.product_id) ?? 0,
+    }));
+    total = deliveryNetTotals(itemLines, returnLines).netAmount;
 
     // Payment: only when delivered and total>0; otherwise remove
     const { data: existingPay } = await supabase
@@ -350,15 +450,22 @@ export const listTodayDeliveries = createServerFn({ method: "GET" })
     const today = todayStr();
     const { data, error } = await supabase
       .from("deliveries")
-      .select("id, status, comment, photo_url, customer_id, updated_at, customers(name), delivery_items(quantity, unit_price)")
+      .select(
+        "id, status, comment, photo_url, customer_id, updated_at, customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
+      )
       .eq("driver_id", userId)
       .eq("delivery_date", today)
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []).map((r: any) => {
-      const items = (r.delivery_items ?? []) as Array<{ quantity: number; unit_price: number }>;
-      const total = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
-      const units = items.reduce((s, it) => s + Number(it.quantity), 0);
+      const items = (r.delivery_items ?? []) as Array<{
+        product_id: string;
+        quantity: number;
+        unit_price: number;
+        line_total?: number;
+      }>;
+      const returns = (r.delivery_returns ?? []) as Array<{ product_id: string; quantity: number }>;
+      const totals = deliveryNetTotals(items, returns);
       return {
         id: r.id as string,
         status: r.status as "pending" | "delivered" | "failed",
@@ -367,8 +474,8 @@ export const listTodayDeliveries = createServerFn({ method: "GET" })
         customer_id: r.customer_id as string,
         customer_name: r.customers?.name ?? null,
         updated_at: r.updated_at as string,
-        total,
-        units,
+        total: totals.netAmount,
+        units: totals.netUnits,
       };
     });
   });
@@ -399,6 +506,8 @@ export const createPayment = createServerFn({ method: "POST" })
     if (rErr) throw new Error(rErr.message);
     const route = (routes ?? [])[0] as any;
     if (!route) throw new Error("No tienes una ruta asignada.");
+
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, todayStr());
 
     const { data: row, error } = await supabase
       .from("payments")
@@ -435,22 +544,33 @@ export const listTodayPayments = createServerFn({ method: "GET" })
     const { startISO, endISO } = tzDayRange(today);
     const { data, error } = await supabase
       .from("payments")
-      .select("id, amount, status, method, note, paid_at, customer_id, customers(name)")
+      .select(
+        "id, amount, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
+      )
       .eq("driver_id", userId)
       .gte("paid_at", startISO)
       .lt("paid_at", endISO)
       .order("paid_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r: any) => ({
-      id: r.id as string,
-      amount: Number(r.amount),
-      status: r.status as "paid" | "pending",
-      method: r.method as "cash" | "transfer" | "credit" | "other",
-      note: r.note as string | null,
-      paid_at: r.paid_at as string,
-      customer_id: r.customer_id as string,
-      customer_name: r.customers?.name ?? null,
-    }));
+    return (data ?? []).map((r: any) => {
+      const items = (r.deliveries?.delivery_items ?? []) as Array<{
+        product_id: string;
+        quantity: number;
+        unit_price: number;
+        line_total?: number;
+      }>;
+      const returns = (r.deliveries?.delivery_returns ?? []) as Array<{ product_id: string; quantity: number }>;
+      return {
+        id: r.id as string,
+        amount: deliveryPaymentAmount(Number(r.amount), items, returns),
+        status: r.status as "paid" | "pending",
+        method: r.method as "cash" | "transfer" | "credit" | "other",
+        note: r.note as string | null,
+        paid_at: r.paid_at as string,
+        customer_id: r.customer_id as string,
+        customer_name: r.customers?.name ?? null,
+      };
+    });
   });
 
 // ============ EXPENSES ============
@@ -469,19 +589,23 @@ export const createExpense = createServerFn({ method: "POST" })
     const branchId = await getMyBranch(supabase, userId);
     const { data: routes } = await supabase
       .from("routes")
-      .select("id")
+      .select("id, branch_id")
       .eq("driver_id", userId)
       .eq("is_active", true)
       .order("updated_at", { ascending: false })
       .limit(1);
-    const routeId = (routes ?? [])[0]?.id ?? null;
+    const route = (routes ?? [])[0] as any;
+    if (!route?.id) throw new Error("No tienes una ruta asignada.");
+
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, todayStr());
 
     const { data: row, error } = await supabase
       .from("expenses")
       .insert({
         branch_id: branchId,
-        route_id: routeId,
+        route_id: route.id,
         driver_id: userId,
+        expense_date: todayStr(),
         amount: data.amount,
         description: data.description,
         photo_url: data.photo_path ?? null,
@@ -564,4 +688,58 @@ export const getPhotoViewUrls = createServerFn({ method: "POST" })
       if (s.path && s.signedUrl) map[s.path] = s.signedUrl;
     }
     return map;
+  });
+
+// ============ CUSTOMER LOCATION ============
+
+export const updateCustomerLocation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      customer_id: z.string().uuid(),
+      lat: z.number(),
+      lng: z.number(),
+      address: z.string().max(255).optional().nullable(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    // Verify customer is on driver's active route
+    const { data: routes, error: rErr } = await supabase
+      .from("routes")
+      .select("id, branch_id")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) throw new Error("No tienes una ruta asignada.");
+
+    // Verify location editing is enabled for this branch
+    const locationEnabled = await branchDriverLocationEnabled(supabase, route.branch_id as string);
+    if (!locationEnabled) throw new Error("El registro de ubicación no está habilitado para esta sucursal.");
+
+    const { data: rc, error: rcErr } = await supabase
+      .from("route_customers")
+      .select("customer_id")
+      .eq("route_id", route.id)
+      .eq("customer_id", data.customer_id)
+      .maybeSingle();
+    if (rcErr) throw new Error(rcErr.message);
+    if (!rc) throw new Error("Cliente no pertenece a tu ruta.");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("customers")
+      .update({
+        lat: data.lat,
+        lng: data.lng,
+        ...(data.address != null ? { address: data.address } : {}),
+      } as any)
+      .eq("id", data.customer_id);
+    if (error) throw new Error(error.message);
+
+    return { customer_id: data.customer_id, lat: data.lat, lng: data.lng, address: data.address ?? null };
   });

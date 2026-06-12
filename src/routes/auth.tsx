@@ -1,3 +1,5 @@
+import { ViewIcon, ViewOffIcon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute, redirect, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -9,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { bootstrapStatus, bootstrapOwner } from "@/lib/api/bootstrap.functions";
 import { toast } from "sonner";
+
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -41,6 +44,35 @@ function AuthPage() {
   );
 }
 
+function PasswordInput({ id, value, onChange, autoComplete, placeholder }: {
+  id?: string; value: string; onChange: (v: string) => void;
+  autoComplete?: string; placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type={show ? "text" : "password"}
+        required
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        className="pr-10"
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+        tabIndex={-1}
+      >
+        {show ? <Icon icon={ViewOffIcon} className="h-4 w-4" /> : <Icon icon={ViewIcon} className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
+
 function LoginForm() {
   const navigate = useNavigate();
   const router = useRouter();
@@ -66,7 +98,7 @@ function LoginForm() {
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="password">Contraseña</Label>
-        <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+        <PasswordInput id="password" value={password} onChange={setPassword} autoComplete="current-password" />
       </div>
       <Button type="submit" className="w-full" disabled={loading}>{loading ? "Entrando…" : "Entrar"}</Button>
     </form>
@@ -109,7 +141,7 @@ function BootstrapForm() {
       </div>
       <div className="space-y-1.5">
         <Label>Contraseña</Label>
-        <Input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+        <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
       </div>
       <Button type="submit" className="w-full" disabled={loading}>{loading ? "Creando…" : "Crear propietario"}</Button>
     </form>

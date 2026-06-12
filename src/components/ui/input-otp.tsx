@@ -1,6 +1,8 @@
+import { MinusSignIcon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import * as React from "react";
 import { OTPInput, OTPInputContext } from "input-otp";
-import { Minus } from "lucide-react";
+
 
 import { cn } from "@/lib/utils";
 
@@ -61,7 +63,7 @@ const InputOTPSeparator = React.forwardRef<
   React.ComponentPropsWithoutRef<"div">
 >(({ ...props }, ref) => (
   <div ref={ref} role="separator" {...props}>
-    <Minus />
+    <Icon icon={MinusSignIcon} />
   </div>
 ));
 InputOTPSeparator.displayName = "InputOTPSeparator";

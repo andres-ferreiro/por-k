@@ -1,17 +1,25 @@
+import { Add01Icon, ArrowRight01Icon, Delete02Icon, Edit01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   listRoutes, createRoute, updateRoute, deleteRoute, listBranchDrivers,
 } from "@/lib/api/routes.functions";
 import { getMyContext } from "@/lib/api/context.functions";
 import { listBranches } from "@/lib/api/branches.functions";
+import { useBranchScope } from "@/lib/branch-scope";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterByBranch, filterBySearch, filterByActive } from "@/lib/table-utils";
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  StatusFilterSelect,
+} from "@/components/admin/data-table";
+import { ActiveStatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -19,7 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, ChevronRight } from "lucide-react";
+
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/app/routes/")({
@@ -53,6 +61,10 @@ function RoutesPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<RouteRow | null>(null);
   const [deleting, setDeleting] = useState<RouteRow | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const { branchId } = useBranchScope();
+  const { sortKey, sortDir, toggle, sort } = useSorting("name");
   const isOwner = ctx?.primaryRole === "owner";
 
   const qc = useQueryClient();
@@ -67,38 +79,61 @@ function RoutesPage() {
     onError: (e: any) => toast.error(e?.message ?? "Error"),
   });
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Rutas</h1>
-          <p className="text-muted-foreground">Define rutas asignando clientes y un repartidor.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> Nueva ruta
-        </Button>
-      </div>
+  const rows = useMemo(() => {
+    let scoped = filterByBranch(routes ?? [], branchId);
+    scoped = filterBySearch(scoped, search, (r) =>
+      [r.name, r.driver_name, r.branch_name].filter(Boolean).join(" "),
+    );
+    scoped = filterByActive(scoped, statusFilter as "all" | "active" | "inactive");
+    return sort(scoped, (r, key) => {
+      if (key === "customer_count") return r.customer_count;
+      if (key === "is_active") return r.is_active;
+      return (r as Record<string, unknown>)[key];
+    });
+  }, [routes, branchId, search, statusFilter, sort]);
 
-      <Card>
+  const colSpan = isOwner ? 6 : 5;
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Rutas"
+        description="Define rutas asignando clientes y un repartidor."
+        action={
+          <Button onClick={() => { setEditing(null); setOpen(true); }}>
+            <Icon icon={Add01Icon} className="h-4 w-4 mr-1" /> Nueva ruta
+          </Button>
+        }
+      />
+
+      <TableToolbar
+        search
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar rutas…"
+        filters={<StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} activeLabel="Activas" inactiveLabel="Inactivas" />}
+      />
+
+      <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Repartidor</TableHead>
-              <TableHead>Clientes</TableHead>
-              {isOwner && <TableHead>Sucursal</TableHead>}
-              <TableHead>Estado</TableHead>
+              <SortableTableHead label="Nombre" sortKey="name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Repartidor" sortKey="driver_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Clientes" sortKey="customer_count" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              {isOwner && (
+                <SortableTableHead label="Sucursal" sortKey="branch_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              )}
+              <SortableTableHead label="Estado" sortKey="is_active" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <TableHead className="w-32" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && (
-              <TableRow><TableCell colSpan={isOwner ? 6 : 5} className="text-center text-muted-foreground py-8">Cargando…</TableCell></TableRow>
+            <TableStatusRow colSpan={colSpan} loading={isLoading} />
+            {!isLoading && rows.length === 0 && (
+              <TableStatusRow colSpan={colSpan} empty emptyMessage="Aún no hay rutas." />
             )}
-            {!isLoading && (routes?.length ?? 0) === 0 && (
-              <TableRow><TableCell colSpan={isOwner ? 6 : 5} className="text-center text-muted-foreground py-8">Aún no hay rutas.</TableCell></TableRow>
-            )}
-            {(routes ?? []).map((r) => (
+            {rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">
                   <Link to="/app/routes/$routeId" params={{ routeId: r.id }} className="hover:underline">
@@ -108,18 +143,18 @@ function RoutesPage() {
                 <TableCell>{r.driver_name ?? <span className="text-muted-foreground">Sin asignar</span>}</TableCell>
                 <TableCell>{r.customer_count}</TableCell>
                 {isOwner && <TableCell>{r.branch_name ?? "—"}</TableCell>}
-                <TableCell>{r.is_active ? <Badge>Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
+                <TableCell><ActiveStatusBadge active={r.is_active} activeLabel="Activa" inactiveLabel="Inactiva" /></TableCell>
                 <TableCell>
                   <div className="flex gap-1">
                     <Button variant="ghost" size="icon" onClick={() => { setEditing(r as RouteRow); setOpen(true); }}>
-                      <Pencil className="h-4 w-4" />
+                      <Icon icon={Edit01Icon} className="h-4 w-4" />
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => setDeleting(r as RouteRow)}>
-                      <Trash2 className="h-4 w-4" />
+                      <Icon icon={Delete02Icon} className="h-4 w-4" />
                     </Button>
                     <Button variant="ghost" size="icon" asChild>
                       <Link to="/app/routes/$routeId" params={{ routeId: r.id }}>
-                        <ChevronRight className="h-4 w-4" />
+                        <Icon icon={ArrowRight01Icon} className="h-4 w-4" />
                       </Link>
                     </Button>
                   </div>
@@ -128,7 +163,7 @@ function RoutesPage() {
             ))}
           </TableBody>
         </Table>
-      </Card>
+      </DataTableCard>
 
       <RouteDialog
         open={open}

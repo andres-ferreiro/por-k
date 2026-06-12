@@ -1,3 +1,5 @@
+import { ArrowLeft01Icon, SaveIcon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -5,15 +7,15 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getRoute, updateRoute, setRouteCustomers, listBranchDrivers,
 } from "@/lib/api/routes.functions";
-import { listCustomers } from "@/lib/api/customers.functions";
+import { listCustomers, listCustomerImportBatches } from "@/lib/api/customers.functions";
 import { getMyContext } from "@/lib/api/context.functions";
+import { RouteStopsEditor } from "@/components/admin/route-stops-editor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, ArrowUp, ArrowDown, X, Save } from "lucide-react";
+
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/app/routes/$routeId")({
@@ -25,6 +27,7 @@ function RouteDetailPage() {
   const qc = useQueryClient();
   const get = useServerFn(getRoute);
   const listC = useServerFn(listCustomers);
+  const listBatches = useServerFn(listCustomerImportBatches);
   const drivers = useServerFn(listBranchDrivers);
   const update = useServerFn(updateRoute);
   const setStops = useServerFn(setRouteCustomers);
@@ -44,16 +47,28 @@ function RouteDetailPage() {
     queryFn: () => drivers({ data: { branch_id: route?.branch_id ?? null } }),
     enabled: !!route,
   });
+  const { data: importBatches } = useQuery({
+    queryKey: ["customer-import-batches", route?.branch_id ?? null],
+    queryFn: () => listBatches({ data: { branch_id: route?.branch_id ?? null } }),
+    enabled: !!route?.branch_id,
+  });
 
   const [name, setName] = useState("");
   const [driverId, setDriverId] = useState<string>("");
   const [stopIds, setStopIds] = useState<string[]>([]);
+  const [savedStopIds, setSavedStopIds] = useState<string[]>([]);
+  const [savedName, setSavedName] = useState("");
+  const [savedDriverId, setSavedDriverId] = useState("");
 
   useEffect(() => {
     if (!route) return;
+    const ids = route.stops.map((s: { id: string }) => s.id);
     setName(route.name);
     setDriverId(route.driver_id ?? "");
-    setStopIds(route.stops.map((s: any) => s.id));
+    setStopIds(ids);
+    setSavedStopIds(ids);
+    setSavedName(route.name);
+    setSavedDriverId(route.driver_id ?? "");
   }, [route]);
 
   const branchCustomers = useMemo(() => {
@@ -61,45 +76,29 @@ function RouteDetailPage() {
     return allCustomers.filter((c) => c.branch_id === route.branch_id);
   }, [allCustomers, route]);
 
-  const stopMap = useMemo(() => {
-    const m = new Map<string, any>();
-    for (const c of branchCustomers) m.set(c.id, c);
-    return m;
-  }, [branchCustomers]);
+  const stopsDirty = useMemo(
+    () => stopIds.length !== savedStopIds.length || stopIds.some((id, i) => id !== savedStopIds[i]),
+    [stopIds, savedStopIds],
+  );
+  const headerDirty = name !== savedName || driverId !== savedDriverId;
+  const isDirty = stopsDirty || headerDirty;
 
-  function toggleCustomer(id: string, checked: boolean) {
-    setStopIds((prev) => {
-      if (checked) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((x) => x !== id);
-    });
-  }
-
-  function move(idx: number, dir: -1 | 1) {
-    setStopIds((prev) => {
-      const next = [...prev];
-      const j = idx + dir;
-      if (j < 0 || j >= next.length) return prev;
-      [next[idx], next[j]] = [next[j], next[idx]];
-      return next;
-    });
-  }
-
-  const saveHeader = useMutation({
-    mutationFn: () => update({ data: { id: routeId, name, driver_id: driverId || null } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["route", routeId] });
-      qc.invalidateQueries({ queryKey: ["routes"] });
-      toast.success("Ruta actualizada");
+  const saveAll = useMutation({
+    mutationFn: async () => {
+      if (headerDirty) {
+        await update({ data: { id: routeId, name, driver_id: driverId || null } });
+      }
+      if (stopsDirty) {
+        await setStops({ data: { route_id: routeId, customer_ids: stopIds } });
+      }
     },
-    onError: (e: any) => toast.error(e?.message ?? "Error"),
-  });
-
-  const saveStops = useMutation({
-    mutationFn: () => setStops({ data: { route_id: routeId, customer_ids: stopIds } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["route", routeId] });
       qc.invalidateQueries({ queryKey: ["routes"] });
-      toast.success("Clientes guardados");
+      setSavedStopIds([...stopIds]);
+      setSavedName(name);
+      setSavedDriverId(driverId);
+      toast.success("Ruta guardada");
     },
     onError: (e: any) => toast.error(e?.message ?? "Error"),
   });
@@ -111,23 +110,33 @@ function RouteDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" asChild>
-          <Link to="/app/routes"><ArrowLeft className="h-4 w-4" /></Link>
-        </Button>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{route.name}</h1>
-          <p className="text-muted-foreground">
-            {isOwner && route.branch_name ? `${route.branch_name} · ` : ""}
-            {stopIds.length} {stopIds.length === 1 ? "cliente" : "clientes"}
-          </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/app/routes"><Icon icon={ArrowLeft01Icon} className="h-4 w-4" /></Link>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">{route.name}</h1>
+            <p className="text-muted-foreground">
+              {isOwner && route.branch_name ? `${route.branch_name} · ` : ""}
+              {stopIds.length} {stopIds.length === 1 ? "cliente" : "clientes"}
+              {isDirty && <span className="text-amber-600"> · Cambios sin guardar</span>}
+            </p>
+          </div>
         </div>
+        <Button
+          onClick={() => saveAll.mutate()}
+          disabled={!isDirty || saveAll.isPending || !name}
+        >
+          <Icon icon={SaveIcon} className="h-4 w-4 mr-1" />
+          {saveAll.isPending ? "Guardando…" : "Guardar ruta"}
+        </Button>
       </div>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Información</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Nombre</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
             <div className="space-y-1.5">
               <Label>Repartidor</Label>
@@ -142,80 +151,15 @@ function RouteDetailPage() {
               </Select>
             </div>
           </div>
-          <div>
-            <Button onClick={() => saveHeader.mutate()} disabled={saveHeader.isPending || !name}>
-              <Save className="h-4 w-4 mr-1" />
-              {saveHeader.isPending ? "Guardando…" : "Guardar cambios"}
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Orden de visitas</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {stopIds.length === 0 && (
-              <p className="text-sm text-muted-foreground">Sin clientes en esta ruta todavía.</p>
-            )}
-            {stopIds.map((id, i) => {
-              const c = stopMap.get(id);
-              return (
-                <div key={id} className="flex items-center gap-2 rounded-md border p-2">
-                  <div className="w-6 text-center text-sm text-muted-foreground">{i + 1}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{c?.name ?? id.slice(0, 8)}</div>
-                    {c?.address && <div className="text-xs text-muted-foreground truncate">{c.address}</div>}
-                  </div>
-                  <Button variant="ghost" size="icon" onClick={() => move(i, -1)} disabled={i === 0}>
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => move(i, 1)} disabled={i === stopIds.length - 1}>
-                    <ArrowDown className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => toggleCustomer(id, false)}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              );
-            })}
-            <div className="pt-2">
-              <Button onClick={() => saveStops.mutate()} disabled={saveStops.isPending}>
-                <Save className="h-4 w-4 mr-1" />
-                {saveStops.isPending ? "Guardando…" : "Guardar clientes"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="text-base">Clientes disponibles</CardTitle></CardHeader>
-          <CardContent>
-            {branchCustomers.length === 0 && (
-              <p className="text-sm text-muted-foreground">No hay clientes en esta sucursal.</p>
-            )}
-            <div className="space-y-1 max-h-[400px] overflow-y-auto">
-              {branchCustomers.map((c) => {
-                const checked = stopIds.includes(c.id);
-                return (
-                  <label
-                    key={c.id}
-                    className="flex items-center gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
-                  >
-                    <Checkbox checked={checked} onCheckedChange={(v) => toggleCustomer(c.id, !!v)} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{c.name}</div>
-                      {c.address && <div className="text-xs text-muted-foreground truncate">{c.address}</div>}
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <RouteStopsEditor
+        customers={branchCustomers}
+        importBatches={importBatches ?? []}
+        stopIds={stopIds}
+        onStopIdsChange={setStopIds}
+      />
     </div>
   );
 }

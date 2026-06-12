@@ -3,15 +3,19 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
 
-async function getMyBranch(supabase: any, userId: string): Promise<string> {
+async function resolveBranchId(
+  supabase: any,
+  userId: string,
+  override?: string | null,
+): Promise<string | null> {
+  if (override) return override;
   const { data, error } = await supabase
     .from("profiles")
     .select("branch_id")
     .eq("id", userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data?.branch_id) throw new Error("Tu cuenta no tiene sucursal asignada.");
-  return data.branch_id as string;
+  return (data?.branch_id as string | null) ?? null;
 }
 
 async function fetchProfileNames(ids: string[]): Promise<Map<string, string | null>> {
@@ -24,21 +28,26 @@ async function fetchProfileNames(ids: string[]): Promise<Map<string, string | nu
   return map;
 }
 
-export const listRoutesForDispatch = createServerFn({ method: "GET" })
+export const listRoutesForDispatch = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const branchId = await getMyBranch(context.supabase, context.userId);
-    const { data, error } = await context.supabase
+  .inputValidator((d: unknown) =>
+    z.object({ branch_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
+    let q = context.supabase
       .from("routes")
-      .select("id, name, driver_id")
-      .eq("branch_id", branchId)
+      .select("id, name, driver_id, branch_id")
       .eq("is_active", true)
       .order("name");
+    if (branchId) q = q.eq("branch_id", branchId);
+    const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
-    const names = await fetchProfileNames((data ?? []).map((r: any) => r.driver_id).filter(Boolean));
-    return (data ?? []).map((r: any) => ({
+    const names = await fetchProfileNames((rows ?? []).map((r: any) => r.driver_id).filter(Boolean));
+    return (rows ?? []).map((r: any) => ({
       id: r.id as string,
       name: r.name as string,
+      branch_id: r.branch_id as string,
       driver_id: (r.driver_id as string | null) ?? null,
       driver_name: r.driver_id ? names.get(r.driver_id) ?? null : null,
     }));
@@ -51,7 +60,8 @@ export const listProductsActive = createServerFn({ method: "GET" })
       .from("products")
       .select("id, name, unit")
       .eq("is_active", true)
-      .order("name");
+      .order("display_order", { ascending: true })
+      .order("name", { ascending: true });
     if (error) throw new Error(error.message);
     return (data ?? []) as { id: string; name: string; unit: string }[];
   });
@@ -77,18 +87,21 @@ export const createDispatch = createServerFn({ method: "POST" })
     return parsed;
   })
   .handler(async ({ data, context }) => {
-    const branchId = await getMyBranch(context.supabase, context.userId);
-
-    // Verify route belongs to branch
     const { data: route, error: rErr } = await context.supabase
       .from("routes")
       .select("id, branch_id")
       .eq("id", data.route_id)
       .maybeSingle();
     if (rErr) throw new Error(rErr.message);
-    if (!route || route.branch_id !== branchId) throw new Error("Ruta inválida.");
+    if (!route) throw new Error("Ruta inválida.");
 
-    // Verify driver has the driver role and same branch
+    const userBranchId = await resolveBranchId(context.supabase, context.userId, null);
+    if (userBranchId && route.branch_id !== userBranchId) {
+      throw new Error("Ruta inválida.");
+    }
+
+    const branchId = route.branch_id as string;
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const [{ data: driverProfile }, { data: driverRoles }] = await Promise.all([
       supabaseAdmin.from("profiles").select("id, branch_id, is_active").eq("id", data.driver_id).maybeSingle(),
@@ -122,7 +135,6 @@ export const createDispatch = createServerFn({ method: "POST" })
     }));
     const { error: itemsErr } = await context.supabase.from("dispatch_items").insert(rows);
     if (itemsErr) {
-      // rollback header
       await context.supabase.from("dispatches").delete().eq("id", dispatchId);
       throw new Error(itemsErr.message);
     }
@@ -137,19 +149,22 @@ const dateOnly = z
 
 export const listDispatchesToday = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ date: dateOnly }).parse(d ?? {}))
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateOnly, branch_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
   .handler(async ({ data, context }) => {
-    const branchId = await getMyBranch(context.supabase, context.userId);
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
     const dateStr = data.date ?? todayInTZ();
     const { startISO, endISO } = tzDayRange(dateStr);
 
-    const { data: rows, error } = await context.supabase
+    let q = context.supabase
       .from("dispatches")
       .select("id, dispatched_at, route_id, driver_id, dispatched_by, notes, routes(name), dispatch_items(quantity)")
-      .eq("branch_id", branchId)
       .gte("dispatched_at", startISO)
       .lt("dispatched_at", endISO)
       .order("dispatched_at", { ascending: false });
+    if (branchId) q = q.eq("branch_id", branchId);
+    const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
 
     const ids = [
@@ -215,27 +230,121 @@ export const getDispatch = createServerFn({ method: "POST" })
     };
   });
 
+const truckReturnItemSchema = z.object({
+  product_id: z.string().uuid(),
+  quantity: z.number().min(0).max(1_000_000),
+});
+
+export const getTruckReturnForDispatch = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ dispatch_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: rows, error } = await context.supabase
+      .from("truck_returns")
+      .select("id, product_id, quantity, notes, returned_at, products(name, unit)")
+      .eq("dispatch_id", data.dispatch_id);
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((r: any) => ({
+      id: r.id as string,
+      product_id: r.product_id as string,
+      product_name: r.products?.name ?? null,
+      unit: r.products?.unit ?? null,
+      quantity: Number(r.quantity),
+      notes: (r.notes as string | null) ?? null,
+      returned_at: r.returned_at as string,
+    }));
+  });
+
+export const registerTruckReturn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => {
+    const parsed = z
+      .object({
+        dispatch_id: z.string().uuid(),
+        notes: z.string().trim().max(500).optional().nullable(),
+        items: z.array(truckReturnItemSchema).min(1).max(50),
+      })
+      .parse(d);
+    const ids = parsed.items.map((i) => i.product_id);
+    if (new Set(ids).size !== ids.length) throw new Error("No repitas productos en las líneas.");
+    return parsed;
+  })
+  .handler(async ({ data, context }) => {
+    const { data: dispatch, error: dErr } = await context.supabase
+      .from("dispatches")
+      .select("id, branch_id")
+      .eq("id", data.dispatch_id)
+      .maybeSingle();
+    if (dErr) throw new Error(dErr.message);
+    if (!dispatch) throw new Error("Despacho no encontrado.");
+
+    const userBranchId = await resolveBranchId(context.supabase, context.userId, null);
+    if (userBranchId && dispatch.branch_id !== userBranchId) {
+      throw new Error("Despacho inválido.");
+    }
+
+    const { data: dispatchItems, error: diErr } = await context.supabase
+      .from("dispatch_items")
+      .select("product_id")
+      .eq("dispatch_id", data.dispatch_id);
+    if (diErr) throw new Error(diErr.message);
+    const allowed = new Set((dispatchItems ?? []).map((i: any) => i.product_id as string));
+
+    for (const item of data.items) {
+      if (!allowed.has(item.product_id)) {
+        throw new Error("Solo puedes registrar devolución de productos despachados.");
+      }
+    }
+
+    const rows = data.items
+      .filter((i) => i.quantity > 0)
+      .map((i) => ({
+        dispatch_id: data.dispatch_id,
+        product_id: i.product_id,
+        quantity: i.quantity,
+        returned_by: context.userId,
+        notes: data.notes ?? null,
+        returned_at: new Date().toISOString(),
+      }));
+
+    const zeroIds = data.items.filter((i) => i.quantity === 0).map((i) => i.product_id);
+
+    if (rows.length === 0) {
+      const { error: delErr } = await context.supabase
+        .from("truck_returns")
+        .delete()
+        .eq("dispatch_id", data.dispatch_id);
+      if (delErr) throw new Error(delErr.message);
+      return { ok: true };
+    }
+
+    const { error: upsErr } = await context.supabase
+      .from("truck_returns")
+      .upsert(rows, { onConflict: "dispatch_id,product_id" });
+    if (upsErr) throw new Error(upsErr.message);
+
+    if (zeroIds.length > 0) {
+      const { error: delZeroErr } = await context.supabase
+        .from("truck_returns")
+        .delete()
+        .eq("dispatch_id", data.dispatch_id)
+        .in("product_id", zeroIds);
+      if (delZeroErr) throw new Error(delZeroErr.message);
+    }
+
+    return { ok: true };
+  });
+
 export const getTruckReconciliation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
     z.object({ date: dateOnly, branch_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
-    // Resolve branch: explicit override, else user's own branch.
-    // For owners without their own branch and no override, fall back to no filter.
-    let branchId: string | null = data.branch_id ?? null;
-    if (!branchId) {
-      const { data: prof } = await context.supabase
-        .from("profiles")
-        .select("branch_id")
-        .eq("id", context.userId)
-        .maybeSingle();
-      branchId = (prof?.branch_id as string | null) ?? null;
-    }
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
     const dateStr = data.date ?? todayInTZ();
     const { startISO, endISO } = tzDayRange(dateStr);
 
-    // 1. Dispatches today (with items + product info)
     let dq = context.supabase
       .from("dispatches")
       .select("id, route_id, driver_id, branch_id, routes(name), dispatch_items(product_id, quantity, products(name, unit))")
@@ -245,7 +354,17 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     const { data: dispatches, error: dErr } = await dq;
     if (dErr) throw new Error(dErr.message);
 
-    // 2. Deliveries for that delivery_date (with items + returns)
+    const dispatchIds = (dispatches ?? []).map((d: any) => d.id as string);
+    let truckReturns: any[] = [];
+    if (dispatchIds.length > 0) {
+      const { data: tr, error: trErr } = await context.supabase
+        .from("truck_returns")
+        .select("dispatch_id, product_id, quantity, products(name, unit)")
+        .in("dispatch_id", dispatchIds);
+      if (trErr) throw new Error(trErr.message);
+      truckReturns = tr ?? [];
+    }
+
     let delQ = context.supabase
       .from("deliveries")
       .select("id, route_id, driver_id, branch_id, delivery_items(product_id, quantity, products(name, unit)), delivery_returns(product_id, quantity, products(name, unit))")
@@ -261,6 +380,7 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       dispatched: number;
       sold: number;
       customer_returns: number;
+      actual_returned: number;
     };
     type Group = {
       key: string;
@@ -287,7 +407,15 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     const getProd = (g: Group, product_id: string, name: string | null, unit: string | null) => {
       let p = g.products.get(product_id);
       if (!p) {
-        p = { product_id, product_name: name, unit, dispatched: 0, sold: 0, customer_returns: 0 };
+        p = {
+          product_id,
+          product_name: name,
+          unit,
+          dispatched: 0,
+          sold: 0,
+          customer_returns: 0,
+          actual_returned: 0,
+        };
         g.products.set(product_id, p);
       } else {
         if (!p.product_name && name) p.product_name = name;
@@ -296,13 +424,28 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       return p;
     };
 
+    const dispatchMeta = new Map<string, { route_id: string; driver_id: string; route_name: string | null }>();
     for (const d of dispatches ?? []) {
+      dispatchMeta.set(d.id as string, {
+        route_id: d.route_id as string,
+        driver_id: d.driver_id as string,
+        route_name: (d as any).routes?.name ?? null,
+      });
       const g = getGroup(d.route_id as string, d.driver_id as string, (d as any).routes?.name ?? null);
       for (const it of (d as any).dispatch_items ?? []) {
         const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
         p.dispatched += Number(it.quantity ?? 0);
       }
     }
+
+    for (const tr of truckReturns) {
+      const meta = dispatchMeta.get(tr.dispatch_id as string);
+      if (!meta) continue;
+      const g = getGroup(meta.route_id, meta.driver_id, meta.route_name);
+      const p = getProd(g, tr.product_id, tr.products?.name ?? null, tr.products?.unit ?? null);
+      p.actual_returned += Number(tr.quantity ?? 0);
+    }
+
     for (const del of deliveries ?? []) {
       const g = getGroup(del.route_id as string, del.driver_id as string, null);
       for (const it of (del as any).delivery_items ?? []) {
@@ -325,6 +468,7 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       const products = Array.from(g.products.values()).map((p) => ({
         ...p,
         on_truck: p.dispatched - p.sold + p.customer_returns,
+        difference: p.dispatched - p.sold + p.customer_returns - p.actual_returned,
       }));
       products.sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? ""));
       const totals = products.reduce(
@@ -332,9 +476,11 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
           dispatched: acc.dispatched + p.dispatched,
           sold: acc.sold + p.sold,
           customer_returns: acc.customer_returns + p.customer_returns,
+          actual_returned: acc.actual_returned + p.actual_returned,
           on_truck: acc.on_truck + p.on_truck,
+          difference: acc.difference + p.difference,
         }),
-        { dispatched: 0, sold: 0, customer_returns: 0, on_truck: 0 },
+        { dispatched: 0, sold: 0, customer_returns: 0, actual_returned: 0, on_truck: 0, difference: 0 },
       );
       return {
         key: g.key,

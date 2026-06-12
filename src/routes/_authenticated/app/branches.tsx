@@ -1,18 +1,25 @@
+import { Add01Icon, Edit01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { listBranches, createBranch, updateBranch } from "@/lib/api/branches.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil } from "lucide-react";
+
 import { toast } from "sonner";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterBySearch, filterByActive } from "@/lib/table-utils";
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  StatusFilterSelect,
+} from "@/components/admin/data-table";
+import { ActiveStatusBadge } from "@/components/admin/status-badge";
 
 export const Route = createFileRoute("/_authenticated/app/branches")({
   component: BranchesPage,
@@ -25,51 +32,73 @@ function BranchesPage() {
   const { data, isLoading } = useQuery({ queryKey: ["branches"], queryFn: () => list() });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Branch | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const { sortKey, sortDir, toggle, sort } = useSorting("name");
+
+  const rows = useMemo(() => {
+    const filtered = filterBySearch(data ?? [], search, (b) =>
+      [b.name, b.address, b.phone].filter(Boolean).join(" "),
+    );
+    const scoped = filterByActive(filtered, statusFilter as "all" | "active" | "inactive");
+    return sort(scoped, (b, key) => {
+      if (key === "is_active") return b.is_active;
+      return (b as Record<string, unknown>)[key];
+    });
+  }, [data, search, statusFilter, sort]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Sucursales</h1>
-          <p className="text-muted-foreground">Gestiona las sucursales de la empresa.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> Nueva sucursal
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Sucursales"
+        description="Gestiona las sucursales de la empresa."
+        action={
+          <Button onClick={() => { setEditing(null); setOpen(true); }}>
+            <Icon icon={Add01Icon} className="h-4 w-4 mr-1" /> Nueva sucursal
+          </Button>
+        }
+      />
 
-      <Card>
+      <TableToolbar
+        search
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar sucursales…"
+        filters={<StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} activeLabel="Activas" inactiveLabel="Inactivas" />}
+      />
+
+      <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Dirección</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>Estado</TableHead>
+              <SortableTableHead label="Nombre" sortKey="name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Dirección" sortKey="address" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Teléfono" sortKey="phone" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Estado" sortKey="is_active" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <TableHead className="w-16" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Cargando…</TableCell></TableRow>}
-            {!isLoading && (data?.length ?? 0) === 0 && (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Aún no hay sucursales.</TableCell></TableRow>
+            <TableStatusRow colSpan={5} loading={isLoading} />
+            {!isLoading && rows.length === 0 && (
+              <TableStatusRow colSpan={5} empty emptyMessage="Aún no hay sucursales." />
             )}
-            {(data ?? []).map((b) => (
+            {rows.map((b) => (
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.name}</TableCell>
                 <TableCell>{b.address ?? "—"}</TableCell>
                 <TableCell>{b.phone ?? "—"}</TableCell>
-                <TableCell>{b.is_active ? <Badge>Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
+                <TableCell><ActiveStatusBadge active={b.is_active} activeLabel="Activa" inactiveLabel="Inactiva" /></TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" onClick={() => { setEditing(b as Branch); setOpen(true); }}>
-                    <Pencil className="h-4 w-4" />
+                    <Icon icon={Edit01Icon} className="h-4 w-4" />
                   </Button>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </Card>
+      </DataTableCard>
 
       <BranchDialog open={open} onOpenChange={setOpen} editing={editing} />
     </div>
@@ -85,7 +114,6 @@ function BranchDialog({ open, onOpenChange, editing }: { open: boolean; onOpenCh
   const [phone, setPhone] = useState(editing?.phone ?? "");
   const [active, setActive] = useState(editing?.is_active ?? true);
 
-  // reset when editing changes
   useState(() => {
     setName(editing?.name ?? "");
     setAddress(editing?.address ?? "");

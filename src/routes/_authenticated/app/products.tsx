@@ -1,3 +1,5 @@
+import { Add01Icon, Cancel01Icon, Edit01Icon, DragDropVerticalIcon, Search01Icon, Tag01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -6,22 +8,28 @@ import {
   listProducts, createProduct, updateProduct,
   listProductCustomerPrices, upsertCustomerPrice, deleteCustomerPrice,
 } from "@/lib/api/products.functions";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterBySearch, filterByActive } from "@/lib/table-utils";
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  StatusFilterSelect,
+} from "@/components/admin/data-table";
+import { ActiveStatusBadge } from "@/components/admin/status-badge";
+import { ProductOrderEditor } from "@/components/admin/product-order-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Tag, X, Search } from "lucide-react";
+
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/app/products")({
   component: ProductsPage,
 });
 
-interface Product { id: string; name: string; unit: string; price: number; is_active: boolean }
+interface Product { id: string; name: string; unit: string; price: number; is_active: boolean; display_order?: number; allow_returns?: boolean }
 
 const fmt = (n: number) => n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
 
@@ -31,51 +39,93 @@ function ProductsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [pricesFor, setPricesFor] = useState<Product | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [orderMode, setOrderMode] = useState(false);
+  const { sortKey, sortDir, toggle, sort } = useSorting("name");
+
+  const rows = useMemo(() => {
+    const filtered = filterBySearch(data ?? [], search, (p) =>
+      [p.name, p.unit].filter(Boolean).join(" "),
+    );
+    const scoped = filterByActive(filtered, statusFilter as "all" | "active" | "inactive");
+    return sort(scoped, (p, key) => {
+      if (key === "price") return Number(p.price ?? 0);
+      if (key === "is_active") return p.is_active;
+      return (p as Record<string, unknown>)[key];
+    });
+  }, [data, search, statusFilter, sort]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Catálogo</h1>
-          <p className="text-muted-foreground">Productos y precios compartidos por toda la empresa.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> Nuevo producto
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Catálogo"
+        description="Productos y precios compartidos por toda la empresa."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={orderMode ? "default" : "outline"}
+              onClick={() => setOrderMode((v) => !v)}
+            >
+              <Icon icon={DragDropVerticalIcon} className="h-4 w-4 mr-1" />
+              {orderMode ? "Vista catálogo" : "Orden repartidor"}
+            </Button>
+            <Button onClick={() => { setEditing(null); setOpen(true); }}>
+              <Icon icon={Add01Icon} className="h-4 w-4 mr-1" /> Nuevo producto
+            </Button>
+          </div>
+        }
+      />
 
-      <Card>
+      {!orderMode && (
+        <TableToolbar
+          search
+          searchValue={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Buscar productos…"
+          filters={<StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />}
+        />
+      )}
+
+      {orderMode ? (
+        <ProductOrderEditor products={data ?? []} />
+      ) : (
+      <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Producto</TableHead>
-              <TableHead>Unidad</TableHead>
-              <TableHead className="text-right">Precio</TableHead>
-              <TableHead>Estado</TableHead>
+              <SortableTableHead label="Producto" sortKey="name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Unidad" sortKey="unit" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Precio" sortKey="price" activeKey={sortKey} direction={sortDir} onSort={toggle} className="text-right" />
+              <SortableTableHead label="Estado" sortKey="is_active" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <TableHead className="w-32" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Cargando…</TableCell></TableRow>}
-            {(data ?? []).map((p: any) => (
+            <TableStatusRow colSpan={5} loading={isLoading} />
+            {!isLoading && rows.length === 0 && (
+              <TableStatusRow colSpan={5} empty emptyMessage="Sin productos." />
+            )}
+            {rows.map((p: any) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
                 <TableCell>{p.unit}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmt(Number(p.price ?? 0))}</TableCell>
-                <TableCell>{p.is_active ? <Badge>Activo</Badge> : <Badge variant="secondary">Inactivo</Badge>}</TableCell>
+                <TableCell><ActiveStatusBadge active={p.is_active} /></TableCell>
                 <TableCell className="text-right">
                   <Button variant="ghost" size="icon" title="Precios por cliente" onClick={() => setPricesFor(p as Product)}>
-                    <Tag className="h-4 w-4" />
+                    <Icon icon={Tag01Icon} className="h-4 w-4" />
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => { setEditing(p as Product); setOpen(true); }}>
-                    <Pencil className="h-4 w-4" />
+                    <Icon icon={Edit01Icon} className="h-4 w-4" />
                   </Button>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </Card>
+      </DataTableCard>
+      )}
 
       <ProductDialog open={open} onOpenChange={setOpen} editing={editing} />
       <CustomerPricesDialog product={pricesFor} onOpenChange={(o) => !o && setPricesFor(null)} />
@@ -91,6 +141,7 @@ function ProductDialog({ open, onOpenChange, editing }: { open: boolean; onOpenC
   const [unit, setUnit] = useState("pieza");
   const [price, setPrice] = useState("0");
   const [active, setActive] = useState(true);
+  const [allowReturns, setAllowReturns] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -98,6 +149,7 @@ function ProductDialog({ open, onOpenChange, editing }: { open: boolean; onOpenC
       setUnit(editing?.unit ?? "pieza");
       setPrice(String(editing?.price ?? 0));
       setActive(editing?.is_active ?? true);
+      setAllowReturns(editing?.allow_returns ?? false);
     }
   }, [open, editing]);
 
@@ -105,7 +157,7 @@ function ProductDialog({ open, onOpenChange, editing }: { open: boolean; onOpenC
     mutationFn: async () => {
       const p = Number(price);
       if (!Number.isFinite(p) || p < 0) throw new Error("Precio inválido.");
-      const payload = { name, unit, price: p, is_active: active };
+      const payload = { name, unit, price: p, is_active: active, allow_returns: allowReturns };
       if (editing) return update({ data: { id: editing.id, ...payload } });
       return create({ data: payload });
     },
@@ -133,6 +185,15 @@ function ProductDialog({ open, onOpenChange, editing }: { open: boolean; onOpenC
           <div className="flex items-center justify-between rounded-md border p-3">
             <Label>Activo</Label>
             <Switch checked={active} onCheckedChange={setActive} />
+          </div>
+          <div className="rounded-md border p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Devuelto por repartidor</Label>
+              <Switch checked={allowReturns} onCheckedChange={setAllowReturns} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Permite que el repartidor registre devoluciones de este producto al visitar clientes.
+            </p>
           </div>
         </div>
         <DialogFooter>
@@ -192,7 +253,7 @@ function CustomerPricesDialog({ product, onOpenChange }: { product: Product | nu
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Icon icon={Search01Icon} className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input className="pl-9" placeholder="Buscar cliente o sucursal…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1">
@@ -269,7 +330,7 @@ function CustomerPriceRow({
         disabled={busy || row.price == null}
         onClick={onClear}
       >
-        <X className="h-4 w-4" />
+        <Icon icon={Cancel01Icon} className="h-4 w-4" />
       </Button>
     </div>
   );

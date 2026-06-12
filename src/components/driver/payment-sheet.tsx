@@ -1,3 +1,5 @@
+import { ArrowLeftRightIcon, BanknoteIcon, CreditCardIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { useEffect, useState } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
@@ -7,7 +9,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { createPayment } from "@/lib/api/driver.functions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Banknote, ArrowLeftRight, CreditCard, MoreHorizontal } from "lucide-react";
+
 
 type Method = "cash" | "transfer" | "credit" | "other";
 type Status = "paid" | "pending";
@@ -18,11 +20,11 @@ interface Props {
   customer: { id: string; name: string } | null;
 }
 
-const METHODS: { value: Method; label: string; icon: any }[] = [
-  { value: "cash", label: "Efectivo", icon: Banknote },
-  { value: "transfer", label: "Transferencia", icon: ArrowLeftRight },
-  { value: "credit", label: "Crédito", icon: CreditCard },
-  { value: "other", label: "Otro", icon: MoreHorizontal },
+const METHODS: { value: Method; label: string; icon: typeof BanknoteIcon }[] = [
+  { value: "cash", label: "Efectivo", icon: BanknoteIcon },
+  { value: "transfer", label: "Transferencia", icon: ArrowLeftRightIcon },
+  { value: "credit", label: "Crédito", icon: CreditCardIcon },
+  { value: "other", label: "Otro", icon: MoreHorizontalIcon },
 ];
 
 export function PaymentSheet({ open, onOpenChange, customer }: Props) {
@@ -79,7 +81,7 @@ export function PaymentSheet({ open, onOpenChange, customer }: Props) {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="h-14 text-2xl font-semibold text-center"
+              className="h-14 text-2xl font-semibold text-center tabular-nums"
               autoFocus
             />
           </div>
@@ -110,7 +112,6 @@ export function PaymentSheet({ open, onOpenChange, customer }: Props) {
             <label className="text-sm font-medium">Método</label>
             <div className="grid grid-cols-2 gap-2">
               {METHODS.map((m) => {
-                const Icon = m.icon;
                 const active = method === m.value;
                 return (
                   <button
@@ -121,7 +122,7 @@ export function PaymentSheet({ open, onOpenChange, customer }: Props) {
                       active ? "bg-primary text-primary-foreground border-primary" : "border-input bg-background"
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon icon={m.icon} className="h-4 w-4" />
                     {m.label}
                   </button>
                 );

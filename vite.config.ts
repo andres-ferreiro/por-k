@@ -4,6 +4,7 @@
 //     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
 //     error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
+import path from "node:path";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
@@ -13,7 +14,13 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    resolve: {
+      alias: {
+        "node:async_hooks": path.resolve("./src/lib/async-hooks-shim.ts"),
+      },
+    },
     optimizeDeps: {
+      exclude: ["@tanstack/react-start"],
       include: [
         "@radix-ui/react-dialog",
         "@radix-ui/react-label",
@@ -25,7 +32,6 @@ export default defineConfig({
         "@tanstack/history",
         "@tanstack/react-query",
         "@tanstack/react-router",
-        "@tanstack/react-start",
         "@tanstack/router-core",
         "@tanstack/router-core/ssr/client",
         "@tanstack/router-core/ssr/server",
@@ -33,7 +39,8 @@ export default defineConfig({
         "class-variance-authority",
         "clsx",
         "h3-v2",
-        "lucide-react",
+        "@hugeicons/react",
+        "@hugeicons/core-free-icons",
         "seroval",
         "sonner",
         "tailwind-merge",

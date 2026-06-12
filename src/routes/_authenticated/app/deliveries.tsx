@@ -1,15 +1,11 @@
+import { Download01Icon, ViewIcon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -21,20 +17,26 @@ import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterBySearch } from "@/lib/table-utils";
 import { downloadCSV } from "@/lib/csv";
-import { Download, Eye } from "lucide-react";
+
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  FilterSelect, FilterDateRangePicker,
+} from "@/components/admin/data-table";
+import { DeliveryStatusBadge, PaymentStatusBadge, StatusBadge } from "@/components/admin/status-badge";
+import { StatCardBar, StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
+import { fmtMoney } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/app/deliveries")({
   component: DeliveriesPage,
 });
 
-const fmtMoney = (n: number) =>
-  new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n || 0);
-
-const statusLabel: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  delivered: { label: "Entregada", variant: "secondary" },
-  pending: { label: "Pendiente", variant: "outline" },
-  failed: { label: "Fallida", variant: "destructive" },
+const statusLabel: Record<string, string> = {
+  delivered: "Entregada",
+  pending: "Pendiente",
+  failed: "Fallida",
 };
 
 const methodLabel: Record<string, string> = {
@@ -49,6 +51,8 @@ function DeliveriesPage() {
   const [driverId, setDriverId] = useState("all");
   const [status, setStatus] = useState("all");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const { sortKey, sortDir, toggle, sort } = useSorting("created_at");
 
   const listFn = useServerFn(listDeliveriesAdmin);
   const routesFn = useServerFn(listRoutesForDispatch);
@@ -76,8 +80,20 @@ function DeliveriesPage() {
       }),
   });
 
+  const tableRows = useMemo(() => {
+    const filtered = filterBySearch(rows ?? [], search, (r) =>
+      [r.customer_name, r.route_name, r.driver_name, statusLabel[r.status]].filter(Boolean).join(" "),
+    );
+    return sort(filtered, (r, key) => {
+      if (key === "total") return r.total;
+      if (key === "units") return r.units;
+      if (key === "created_at") return new Date(r.created_at).getTime();
+      return (r as Record<string, unknown>)[key];
+    });
+  }, [rows, search, sort]);
+
   const totals = useMemo(() => {
-    const all = rows ?? [];
+    const all = tableRows;
     const delivered = all.filter((r) => r.status === "delivered");
     return {
       count: all.length,
@@ -87,18 +103,18 @@ function DeliveriesPage() {
       amount: delivered.reduce((a, r) => a + r.total, 0),
       units: delivered.reduce((a, r) => a + r.units, 0),
     };
-  }, [rows]);
+  }, [tableRows]);
 
   function exportCSV() {
-    if (!rows?.length) return;
+    if (!tableRows.length) return;
     downloadCSV(
       `entregas_${dateFrom}_${dateTo}.csv`,
-      rows.map((r) => ({
+      tableRows.map((r) => ({
         fecha: r.delivery_date,
         cliente: r.customer_name ?? "",
         ruta: r.route_name ?? "",
         repartidor: r.driver_name ?? "",
-        estado: statusLabel[r.status]?.label ?? r.status,
+        estado: statusLabel[r.status] ?? r.status,
         unidades: r.units,
         devueltas: r.return_units,
         total: r.total,
@@ -109,124 +125,123 @@ function DeliveriesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Entregas</h1>
-          <p className="text-muted-foreground">Seguimiento de visitas por ruta.</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={exportCSV} disabled={!rows?.length}>
-          <Download className="h-4 w-4 mr-1" /> Exportar CSV
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader title="Entregas" description="Seguimiento de visitas por ruta." />
 
-      <Card>
-        <CardContent className="pt-6 grid gap-3 md:grid-cols-3 lg:grid-cols-5">
-          <Field label="Desde">
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value || today)} />
-          </Field>
-          <Field label="Hasta">
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value || today)} />
-          </Field>
-          <Field label="Ruta">
-            <Select value={routeId} onValueChange={setRouteId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                {(routes ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Repartidor">
-            <Select value={driverId} onValueChange={setDriverId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {(drivers ?? []).map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name ?? d.id.slice(0,8)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Estado">
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="delivered">Entregada</SelectItem>
-                <SelectItem value="pending">Pendiente</SelectItem>
-                <SelectItem value="failed">Fallida</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-        </CardContent>
-      </Card>
+      <TableToolbar
+        search
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar entregas…"
+        filters={
+          <>
+            <FilterDateRangePicker
+              from={dateFrom}
+              to={dateTo}
+              onFromChange={(v) => setDateFrom(v || today)}
+              onToChange={(v) => setDateTo(v || today)}
+            />
+            <FilterSelect value={routeId} onValueChange={setRouteId} placeholder="Ruta">
+              <SelectItem value="all">Todas las rutas</SelectItem>
+              {(routes ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            </FilterSelect>
+            <FilterSelect value={driverId} onValueChange={setDriverId} placeholder="Repartidor">
+              <SelectItem value="all">Todos</SelectItem>
+              {(drivers ?? []).map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name ?? d.id.slice(0,8)}</SelectItem>)}
+            </FilterSelect>
+            <FilterSelect value={status} onValueChange={setStatus} placeholder="Estado">
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="delivered">Entregada</SelectItem>
+              <SelectItem value="pending">Pendiente</SelectItem>
+              <SelectItem value="failed">Fallida</SelectItem>
+            </FilterSelect>
+          </>
+        }
+        actions={
+          <Button variant="outline" className="h-10 text-sm" onClick={exportCSV} disabled={!tableRows.length}>
+            <Icon icon={Download01Icon} className="h-3.5 w-3.5 mr-1" /> CSV
+          </Button>
+        }
+      />
 
-      <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-5">
-        <Stat label="Visitas" value={String(totals.count)} />
-        <Stat label="Entregadas" value={String(totals.delivered)} />
-        <Stat label="Pendientes" value={String(totals.pending)} />
-        <Stat label="Fallidas" value={String(totals.failed)} accent={totals.failed > 0 ? "destructive" : undefined} />
-        <Stat label="Ventas" value={fmtMoney(totals.amount)} />
-      </div>
+      <StatGrid columns={3}>
+        <StatCardSimple label="Visitas" value={totals.count} />
+        <StatCardSimple label="Entregadas" value={totals.delivered} />
+        <StatCardSimple
+          label="Pendientes"
+          value={totals.pending}
+          highlight={totals.pending > 0}
+          badge={totals.pending > 0 ? `${totals.pending} abiertas` : undefined}
+          badgeVariant="neutral"
+        />
+        <StatCardSimple
+          label="Fallidas"
+          value={totals.failed}
+          highlight={totals.failed > 0}
+          badge={totals.failed > 0 ? "Revisar" : undefined}
+          badgeVariant="down"
+        />
+        <StatCardBar
+          label="Estado de visitas"
+          value={totals.count}
+          bars={[totals.delivered, totals.pending, totals.failed]}
+          barLabels={["Ent.", "Pend.", "Fall."]}
+          chartLabel="Entregadas, pendientes y fallidas"
+        />
+        <StatCardSimple label="Ventas" value={totals.amount} mode="money" />
+      </StatGrid>
 
-      <Card>
-        <CardContent className="pt-6">
-          {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-          {!isLoading && (rows?.length ?? 0) === 0 && (
-            <p className="text-sm text-muted-foreground">Sin entregas para los filtros seleccionados.</p>
-          )}
-          {(rows?.length ?? 0) > 0 && (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Ruta</TableHead>
-                    <TableHead>Repartidor</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Unidades</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Cobro</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(rows ?? []).map((r) => {
-                    const st = statusLabel[r.status];
-                    return (
-                      <TableRow key={r.id}>
-                        <TableCell className="whitespace-nowrap text-xs">
-                          {new Date(r.created_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
-                        </TableCell>
-                        <TableCell className="max-w-[180px] truncate">{r.customer_name ?? "—"}</TableCell>
-                        <TableCell>{r.route_name ?? "—"}</TableCell>
-                        <TableCell>{r.driver_name ?? "—"}</TableCell>
-                        <TableCell><Badge variant={st.variant}>{st.label}</Badge></TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {r.units}{r.return_units > 0 && <span className="text-xs text-muted-foreground"> (−{r.return_units})</span>}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.total)}</TableCell>
-                        <TableCell className="text-xs">
-                          {r.payment ? (
-                            <Badge variant={r.payment.status === "paid" ? "secondary" : "destructive"}>
-                              {methodLabel[r.payment.method]} · {r.payment.status === "paid" ? "Pagado" : "Pendiente"}
-                            </Badge>
-                          ) : "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => setOpenId(r.id)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <DataTableCard>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortableTableHead label="Fecha" sortKey="created_at" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Cliente" sortKey="customer_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Ruta" sortKey="route_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Repartidor" sortKey="driver_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Estado" sortKey="status" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Unidades" sortKey="units" activeKey={sortKey} direction={sortDir} onSort={toggle} className="text-right" />
+              <SortableTableHead label="Total" sortKey="total" activeKey={sortKey} direction={sortDir} onSort={toggle} className="text-right" />
+              <TableHead>Cobro</TableHead>
+              <TableHead className="w-10" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableStatusRow colSpan={9} loading={isLoading} />
+            {!isLoading && tableRows.length === 0 && (
+              <TableStatusRow colSpan={9} empty emptyMessage="Sin entregas para los filtros seleccionados." />
+            )}
+            {tableRows.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="whitespace-nowrap text-xs">
+                  {new Date(r.created_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
+                </TableCell>
+                <TableCell className="max-w-[180px] truncate">{r.customer_name ?? "—"}</TableCell>
+                <TableCell>{r.route_name ?? "—"}</TableCell>
+                <TableCell>{r.driver_name ?? "—"}</TableCell>
+                <TableCell><DeliveryStatusBadge status={r.status} /></TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {r.units}{r.return_units > 0 && <span className="text-xs text-muted-foreground"> (−{r.return_units})</span>}
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.total)}</TableCell>
+                <TableCell className="text-xs">
+                  {r.payment ? (
+                    <span className="inline-flex flex-col gap-0.5">
+                      <PaymentStatusBadge status={r.payment.status} />
+                      <StatusBadge tone="neutral">{methodLabel[r.payment.method]}</StatusBadge>
+                    </span>
+                  ) : "—"}
+                </TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="icon" onClick={() => setOpenId(r.id)}>
+                    <Icon icon={ViewIcon} className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </DataTableCard>
 
       <DeliveryDetailDialog id={openId} onClose={() => setOpenId(null)} />
     </div>
@@ -252,7 +267,7 @@ function DeliveryDetailDialog({ id, onClose }: { id: string | null; onClose: () 
               <Info label="Cliente" value={data.customer_name ?? "—"} />
               <Info label="Repartidor" value={data.driver_name ?? "—"} />
               <Info label="Ruta" value={data.route_name ?? "—"} />
-              <Info label="Estado" value={statusLabel[data.status]?.label ?? data.status} />
+              <Info label="Estado" value={statusLabel[data.status] ?? data.status} />
               {data.customer_address && <Info label="Dirección" value={data.customer_address} className="col-span-2" />}
             </div>
 
@@ -269,8 +284,8 @@ function DeliveryDetailDialog({ id, onClose }: { id: string | null; onClose: () 
                     </div>
                   ))}
                   <div className="flex justify-between p-2 text-sm font-semibold bg-muted/40">
-                    <span>Total</span>
-                    <span className="tabular-nums">{fmtMoney(data.items.reduce((a, i) => a + i.line_total, 0))}</span>
+                    <span>Subtotal</span>
+                    <span className="tabular-nums">{fmtMoney(data.totals.grossAmount)}</span>
                   </div>
                 </div>
               )}
@@ -279,23 +294,37 @@ function DeliveryDetailDialog({ id, onClose }: { id: string | null; onClose: () 
             {data.returns.length > 0 && (
               <Section title={`Devoluciones (${data.returns.length})`}>
                 <div className="border rounded-md divide-y">
-                  {data.returns.map((i) => (
-                    <div key={i.id} className="flex justify-between p-2 text-sm">
+                  {data.returns.map((i) => {
+                    const unitPrice = data.items.find((it) => it.product_id === i.product_id)?.unit_price ?? 0;
+                    const lineTotal = i.quantity * unitPrice;
+                    return (
+                    <div key={i.id} className="grid grid-cols-[1fr_auto_auto] gap-3 p-2 text-sm">
                       <span className="truncate">{i.product_name ?? "—"}</span>
-                      <span className="text-muted-foreground tabular-nums">{i.quantity}{i.unit ? ` ${i.unit}` : ""}</span>
+                      <span className="text-muted-foreground tabular-nums">{i.quantity}{i.unit ? ` ${i.unit}` : ""} × {fmtMoney(unitPrice)}</span>
+                      <span className="font-medium tabular-nums text-destructive">−{fmtMoney(lineTotal)}</span>
                     </div>
-                  ))}
+                    );
+                  })}
+                  <div className="flex justify-between p-2 text-sm font-semibold bg-muted/40">
+                    <span>Total neto</span>
+                    <span className="tabular-nums">{fmtMoney(data.totals.netAmount)}</span>
+                  </div>
                 </div>
               </Section>
+            )}
+
+            {data.returns.length === 0 && data.items.length > 0 && (
+              <div className="flex justify-between text-sm font-semibold px-1">
+                <span>Total neto</span>
+                <span className="tabular-nums">{fmtMoney(data.totals.netAmount)}</span>
+              </div>
             )}
 
             {data.payment && (
               <Section title="Cobro">
                 <div className="flex flex-wrap gap-2 text-sm items-center">
-                  <Badge variant={data.payment.status === "paid" ? "secondary" : "destructive"}>
-                    {data.payment.status === "paid" ? "Pagado" : "Pendiente"}
-                  </Badge>
-                  <Badge variant="outline">{methodLabel[data.payment.method]}</Badge>
+                  <PaymentStatusBadge status={data.payment.status} />
+                  <StatusBadge tone="neutral">{methodLabel[data.payment.method]}</StatusBadge>
                   <span className="font-medium tabular-nums">{fmtMoney(data.payment.amount)}</span>
                   <span className="text-muted-foreground text-xs">
                     {new Date(data.payment.paid_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ })}
@@ -312,25 +341,6 @@ function DeliveryDetailDialog({ id, onClose }: { id: string | null; onClose: () 
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function Stat({ label, value, accent }: { label: string; value: string; accent?: "destructive" }) {
-  return (
-    <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle></CardHeader>
-      <CardContent>
-        <div className={`text-2xl font-semibold tabular-nums ${accent === "destructive" ? "text-destructive" : ""}`}>{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function Info({ label, value, className }: { label: string; value: string; className?: string }) {
   return (

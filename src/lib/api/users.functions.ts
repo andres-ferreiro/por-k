@@ -102,6 +102,22 @@ export const createUser = createServerFn({ method: "POST" })
     return { id: userId };
   });
 
+export const resetUserPassword = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      id: z.string().uuid(),
+      password: z.string().min(6).max(72),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await requireOwner(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.id, { password: data.password });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const updateUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

@@ -18,28 +18,34 @@ export type Database = {
         Row: {
           address: string | null
           created_at: string
+          driver_location_enabled: boolean
           id: string
           is_active: boolean
           name: string
           phone: string | null
+          require_dispatch_before_route: boolean
           updated_at: string
         }
         Insert: {
           address?: string | null
           created_at?: string
+          driver_location_enabled?: boolean
           id?: string
           is_active?: boolean
           name: string
           phone?: string | null
+          require_dispatch_before_route?: boolean
           updated_at?: string
         }
         Update: {
           address?: string | null
           created_at?: string
+          driver_location_enabled?: boolean
           id?: string
           is_active?: boolean
           name?: string
           phone?: string | null
+          require_dispatch_before_route?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -83,12 +89,46 @@ export type Database = {
           },
         ]
       }
+      customer_import_batches: {
+        Row: {
+          branch_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string | null
+        }
+        Insert: {
+          branch_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string | null
+        }
+        Update: {
+          branch_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_import_batches_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           address: string | null
           branch_id: string
           created_at: string
           id: string
+          import_batch_id: string | null
+          import_position: number | null
           is_active: boolean
           lat: number | null
           lng: number | null
@@ -103,6 +143,8 @@ export type Database = {
           branch_id: string
           created_at?: string
           id?: string
+          import_batch_id?: string | null
+          import_position?: number | null
           is_active?: boolean
           lat?: number | null
           lng?: number | null
@@ -117,6 +159,8 @@ export type Database = {
           branch_id?: string
           created_at?: string
           id?: string
+          import_batch_id?: string | null
+          import_position?: number | null
           is_active?: boolean
           lat?: number | null
           lng?: number | null
@@ -132,6 +176,13 @@ export type Database = {
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_import_batch_id_fkey"
+            columns: ["import_batch_id"]
+            isOneToOne: false
+            referencedRelation: "customer_import_batches"
             referencedColumns: ["id"]
           },
         ]
@@ -551,7 +602,9 @@ export type Database = {
       }
       products: {
         Row: {
+          allow_returns: boolean
           created_at: string
+          display_order: number
           id: string
           is_active: boolean
           name: string
@@ -560,7 +613,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          allow_returns?: boolean
           created_at?: string
+          display_order?: number
           id?: string
           is_active?: boolean
           name: string
@@ -569,7 +624,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          allow_returns?: boolean
           created_at?: string
+          display_order?: number
           id?: string
           is_active?: boolean
           name?: string
@@ -692,6 +749,61 @@ export type Database = {
           {
             foreignKeyName: "routes_driver_id_fkey"
             columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      truck_returns: {
+        Row: {
+          created_at: string
+          dispatch_id: string
+          id: string
+          notes: string | null
+          product_id: string
+          quantity: number
+          returned_at: string
+          returned_by: string
+        }
+        Insert: {
+          created_at?: string
+          dispatch_id: string
+          id?: string
+          notes?: string | null
+          product_id: string
+          quantity: number
+          returned_at?: string
+          returned_by: string
+        }
+        Update: {
+          created_at?: string
+          dispatch_id?: string
+          id?: string
+          notes?: string | null
+          product_id?: string
+          quantity?: number
+          returned_at?: string
+          returned_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "truck_returns_dispatch_id_fkey"
+            columns: ["dispatch_id"]
+            isOneToOne: false
+            referencedRelation: "dispatches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "truck_returns_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "truck_returns_returned_by_fkey"
+            columns: ["returned_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]

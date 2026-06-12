@@ -61,7 +61,7 @@ export function ExpenseSheet({ open, onOpenChange }: Props) {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="h-14 text-2xl font-semibold text-center"
+              className="h-14 text-2xl font-semibold text-center tabular-nums"
               autoFocus
             />
           </div>

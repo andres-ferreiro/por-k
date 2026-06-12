@@ -1,104 +1,157 @@
-import { useEffect, useRef } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { CrosshairIcon } from "@hugeicons/core-free-icons";
+import {
+  APIProvider,
+  AdvancedMarker,
+  Map,
+  useMap,
+  useMapsLibrary,
+} from "@vis.gl/react-google-maps";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Crosshair } from "lucide-react";
+import { Icon } from "@/components/ui/icon";
 
-// Fix default marker icons (Leaflet expects them at relative paths)
-const iconUrl = "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png";
-const iconRetinaUrl = "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png";
-const shadowUrl = "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png";
-const DefaultIcon = L.icon({
-  iconUrl,
-  iconRetinaUrl,
-  shadowUrl,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
+// Ciudad Juárez, Chihuahua
+const DEFAULT_CENTER = { lat: 31.6904, lng: -106.4245 };
+const DEFAULT_ZOOM = 12;
+const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
+const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID ?? "DEMO_MAP_ID";
 
 export interface LatLng {
   lat: number | null;
   lng: number | null;
 }
 
-export function LocationPicker({
+function readCoord(value: google.maps.LatLng | google.maps.LatLngLiteral): number {
+  if (typeof (value as google.maps.LatLng).lat === "function") {
+    return (value as google.maps.LatLng).lat();
+  }
+  return (value as google.maps.LatLngLiteral).lat;
+}
+
+function readLng(value: google.maps.LatLng | google.maps.LatLngLiteral): number {
+  if (typeof (value as google.maps.LatLng).lng === "function") {
+    return (value as google.maps.LatLng).lng();
+  }
+  return (value as google.maps.LatLngLiteral).lng;
+}
+
+function MapClickHandler({ onClick }: { onClick: (lat: number, lng: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener("click", (e: google.maps.MapMouseEvent) => {
+      if (e.latLng) onClick(e.latLng.lat(), e.latLng.lng());
+    });
+    return () => listener.remove();
+  }, [map, onClick]);
+  return null;
+}
+
+function MapViewport({ lat, lng }: { lat: number | null; lng: number | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || lat == null || lng == null) return;
+    map.panTo({ lat, lng });
+    if ((map.getZoom() ?? 0) < 15) map.setZoom(15);
+  }, [map, lat, lng]);
+  return null;
+}
+
+function AddressSearch({
+  onSelect,
+  onError,
+}: {
+  onSelect: (lat: number, lng: number, address?: string) => void;
+  onError: (message: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const places = useMapsLibrary("places");
+
+  useEffect(() => {
+    if (!places || !containerRef.current) return;
+
+    const autocomplete = new places.PlaceAutocompleteElement({
+      includedRegionCodes: ["mx"],
+      locationBias: {
+        center: DEFAULT_CENTER,
+        radius: 80_000,
+      },
+      requestedLanguage: "es",
+      requestedRegion: "mx",
+    });
+    autocomplete.placeholder = "Escribe una dirección…";
+
+    const handleSelect = async (event: Event) => {
+      try {
+        const selectEvent = event as google.maps.places.PlacePredictionSelectEvent;
+        const place = selectEvent.placePrediction.toPlace();
+        await place.fetchFields({ fields: ["location", "formattedAddress"] });
+        const loc = place.location;
+        if (loc) {
+          onSelect(readCoord(loc), readLng(loc), place.formattedAddress ?? undefined);
+        }
+      } catch {
+        onError("No se pudo obtener la ubicación de la dirección seleccionada.");
+      }
+    };
+
+    const handleError = () => {
+      onError(
+        "Error en la búsqueda. Verifica que Places API (New) esté habilitada y que la facturación esté activa en Google Cloud.",
+      );
+    };
+
+    autocomplete.addEventListener("gmp-select", handleSelect);
+    autocomplete.addEventListener("gmp-error", handleError);
+    containerRef.current.replaceChildren(autocomplete);
+
+    return () => {
+      autocomplete.removeEventListener("gmp-select", handleSelect);
+      autocomplete.removeEventListener("gmp-error", handleError);
+      autocomplete.remove();
+    };
+  }, [places, onSelect, onError]);
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">Buscar dirección</Label>
+      <div ref={containerRef} className="gmp-autocomplete-host" />
+    </div>
+  );
+}
+
+function LocationPickerInner({
   value,
   onChange,
+  onAddressSelect,
 }: {
   value: LatLng;
   onChange: (v: LatLng) => void;
+  onAddressSelect?: (address: string) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.Marker | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  // Initialize map once
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    const initLat = value.lat ?? 14.6349;
-    const initLng = value.lng ?? -90.5069; // Guatemala City default
-    const map = L.map(containerRef.current).setView([initLat, initLng], value.lat ? 15 : 11);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap",
-    }).addTo(map);
-    mapRef.current = map;
-    if (value.lat != null && value.lng != null) {
-      const m = L.marker([value.lat, value.lng], { icon: DefaultIcon, draggable: true }).addTo(map);
-      m.on("dragend", () => {
-        const ll = m.getLatLng();
-        onChange({ lat: ll.lat, lng: ll.lng });
-      });
-      markerRef.current = m;
-    }
-    map.on("click", (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng;
-      if (markerRef.current) {
-        markerRef.current.setLatLng([lat, lng]);
-      } else {
-        const m = L.marker([lat, lng], { icon: DefaultIcon, draggable: true }).addTo(map);
-        m.on("dragend", () => {
-          const ll = m.getLatLng();
-          onChange({ lat: ll.lat, lng: ll.lng });
-        });
-        markerRef.current = m;
-      }
+  const center =
+    value.lat != null && value.lng != null
+      ? { lat: value.lat, lng: value.lng }
+      : DEFAULT_CENTER;
+  const zoom = value.lat != null && value.lng != null ? 15 : DEFAULT_ZOOM;
+
+  const handlePlaceSelect = useCallback(
+    (lat: number, lng: number, address?: string) => {
+      setSearchError(null);
       onChange({ lat, lng });
-    });
-    // Ensure tiles render after dialog open
-    setTimeout(() => map.invalidateSize(), 100);
-    return () => {
-      map.remove();
-      mapRef.current = null;
-      markerRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      if (address && onAddressSelect) onAddressSelect(address);
+    },
+    [onChange, onAddressSelect],
+  );
 
-  // Sync marker if external value changes (e.g. "Use my location")
-  useEffect(() => {
-    if (!mapRef.current) return;
-    if (value.lat != null && value.lng != null) {
-      if (markerRef.current) {
-        markerRef.current.setLatLng([value.lat, value.lng]);
-      } else {
-        const m = L.marker([value.lat, value.lng], { icon: DefaultIcon, draggable: true }).addTo(mapRef.current);
-        m.on("dragend", () => {
-          const ll = m.getLatLng();
-          onChange({ lat: ll.lat, lng: ll.lng });
-        });
-        markerRef.current = m;
-      }
-      mapRef.current.setView([value.lat, value.lng], Math.max(mapRef.current.getZoom(), 15));
-    } else if (markerRef.current) {
-      markerRef.current.remove();
-      markerRef.current = null;
-    }
-  }, [value.lat, value.lng, onChange]);
+  const handleMapClick = useCallback(
+    (lat: number, lng: number) => onChange({ lat, lng }),
+    [onChange],
+  );
 
   function useMyLocation() {
     if (!navigator.geolocation) return;
@@ -110,16 +163,50 @@ export function LocationPicker({
   }
 
   return (
-    <div className="space-y-2">
-      <div ref={containerRef} className="h-64 w-full rounded-md border overflow-hidden" />
-      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+    <div className="space-y-3">
+      <AddressSearch onSelect={handlePlaceSelect} onError={setSearchError} />
+      {searchError && (
+        <p className="text-xs text-destructive">{searchError}</p>
+      )}
+
+      <div className="h-64 w-full overflow-hidden rounded-md border">
+        <Map
+          defaultCenter={center}
+          defaultZoom={zoom}
+          mapId={MAP_ID}
+          gestureHandling="greedy"
+          disableDefaultUI
+          zoomControl
+          className="h-full w-full"
+        >
+          <MapClickHandler onClick={handleMapClick} />
+          <MapViewport lat={value.lat} lng={value.lng} />
+          {value.lat != null && value.lng != null && (
+            <AdvancedMarker
+              position={{ lat: value.lat, lng: value.lng }}
+              draggable
+              onDragEnd={(e) => {
+                const latLng = e.latLng;
+                if (latLng) onChange({ lat: latLng.lat(), lng: latLng.lng() });
+              }}
+            />
+          )}
+        </Map>
+      </div>
+
+      <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
         <div className="space-y-1">
           <Label className="text-xs">Latitud</Label>
           <Input
             type="number"
             step="any"
             value={value.lat ?? ""}
-            onChange={(e) => onChange({ lat: e.target.value === "" ? null : Number(e.target.value), lng: value.lng })}
+            onChange={(e) =>
+              onChange({
+                lat: e.target.value === "" ? null : Number(e.target.value),
+                lng: value.lng,
+              })
+            }
           />
         </div>
         <div className="space-y-1">
@@ -128,14 +215,70 @@ export function LocationPicker({
             type="number"
             step="any"
             value={value.lng ?? ""}
-            onChange={(e) => onChange({ lat: value.lat, lng: e.target.value === "" ? null : Number(e.target.value) })}
+            onChange={(e) =>
+              onChange({
+                lat: value.lat,
+                lng: e.target.value === "" ? null : Number(e.target.value),
+              })
+            }
           />
         </div>
         <Button type="button" variant="outline" size="sm" onClick={useMyLocation}>
-          <Crosshair className="h-4 w-4 mr-1" /> Mi ubicación
+          <Icon icon={CrosshairIcon} className="mr-1 h-4 w-4" /> Mi ubicación
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">Haz clic en el mapa o arrastra el marcador para fijar la ubicación.</p>
+
+      <p className="text-xs text-muted-foreground">
+        Busca una dirección, haz clic en el mapa, arrastra el marcador o ingresa coordenadas.
+      </p>
+    </div>
+  );
+}
+
+export function LocationPicker({
+  value,
+  onChange,
+  onAddressSelect,
+}: {
+  value: LatLng;
+  onChange: (v: LatLng) => void;
+  onAddressSelect?: (address: string) => void;
+}) {
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  if (!API_KEY) {
+    return (
+      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+        Configura <code className="text-xs">VITE_GOOGLE_MAPS_API_KEY</code> en tu archivo{" "}
+        <code className="text-xs">.env</code> para usar Google Maps.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {apiError && (
+        <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {apiError}
+        </p>
+      )}
+      <APIProvider
+        apiKey={API_KEY}
+        libraries={["places"]}
+        region="MX"
+        language="es"
+        onError={() =>
+          setApiError(
+            "Google Maps no pudo cargar. Habilita Maps JavaScript API y Places API (New), activa la facturación, y revisa las restricciones de tu API key.",
+          )
+        }
+      >
+        <LocationPickerInner
+          value={value}
+          onChange={onChange}
+          onAddressSelect={onAddressSelect}
+        />
+      </APIProvider>
     </div>
   );
 }

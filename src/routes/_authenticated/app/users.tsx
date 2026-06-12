@@ -1,20 +1,54 @@
+import { Add01Icon, Edit01Icon, ViewIcon, ViewOffIcon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
-import { listUsers, createUser, updateUser } from "@/lib/api/users.functions";
+import { useMemo, useState } from "react";
+import { listUsers, createUser, updateUser, resetUserPassword } from "@/lib/api/users.functions";
 import { listBranches } from "@/lib/api/branches.functions";
+import { useBranchScope } from "@/lib/branch-scope";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterByBranch, filterBySearch, filterByActive } from "@/lib/table-utils";
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  FilterSelect, StatusFilterSelect,
+} from "@/components/admin/data-table";
+import { ActiveStatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil } from "lucide-react";
+
 import { toast } from "sonner";
+
+function PasswordInput({ value, onChange, placeholder, id }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; id?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="pr-10"
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+        tabIndex={-1}
+      >
+        {show ? <Icon icon={ViewOffIcon} className="h-4 w-4" /> : <Icon icon={ViewIcon} className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/_authenticated/app/users")({
   component: UsersPage,
@@ -34,55 +68,94 @@ function UsersPage() {
   const listB = useServerFn(listBranches);
   const { data: users, isLoading } = useQuery({ queryKey: ["users"], queryFn: () => list() });
   const { data: branches } = useQuery({ queryKey: ["branches"], queryFn: () => listB() });
+  const { branchId } = useBranchScope();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const { sortKey, sortDir, toggle, sort } = useSorting("full_name");
+
+  const rows = useMemo(() => {
+    let scoped = filterByBranch(users ?? [], branchId);
+    scoped = filterBySearch(scoped, search, (u) =>
+      [u.full_name, u.email, u.phone, u.branch_name, ...u.roles.map((r) => ROLE_LABEL[r] ?? r)]
+        .filter(Boolean).join(" "),
+    );
+    if (roleFilter !== "all") scoped = scoped.filter((u) => u.roles.includes(roleFilter));
+    scoped = filterByActive(scoped, statusFilter as "all" | "active" | "inactive");
+    return sort(scoped, (u, key) => {
+      if (key === "role") return u.roles.map((r) => ROLE_LABEL[r] ?? r).join(", ");
+      if (key === "is_active") return u.is_active;
+      return (u as Record<string, unknown>)[key];
+    });
+  }, [users, branchId, search, roleFilter, statusFilter, sort]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
-          <p className="text-muted-foreground">Crea cuentas y asigna rol y sucursal.</p>
-        </div>
-        <Button onClick={() => { setEditing(null); setOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" /> Nuevo usuario
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Usuarios"
+        description="Crea cuentas y asigna rol y sucursal."
+        action={
+          <Button onClick={() => { setEditing(null); setOpen(true); }}>
+            <Icon icon={Add01Icon} className="h-4 w-4 mr-1" /> Nuevo usuario
+          </Button>
+        }
+      />
 
-      <Card>
+      <TableToolbar
+        search
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar usuarios…"
+        filters={
+          <>
+            <FilterSelect value={roleFilter} onValueChange={setRoleFilter} placeholder="Rol">
+              <SelectItem value="all">Todos los roles</SelectItem>
+              <SelectItem value="owner">Propietario</SelectItem>
+              <SelectItem value="supervisor">Supervisor</SelectItem>
+              <SelectItem value="cashier">Cajero</SelectItem>
+              <SelectItem value="driver">Repartidor</SelectItem>
+            </FilterSelect>
+            <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
+          </>
+        }
+      />
+
+      <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Correo</TableHead>
-              <TableHead>Rol</TableHead>
-              <TableHead>Sucursal</TableHead>
-              <TableHead>Estado</TableHead>
+              <SortableTableHead label="Nombre" sortKey="full_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Correo" sortKey="email" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Rol" sortKey="role" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Sucursal" sortKey="branch_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Estado" sortKey="is_active" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <TableHead className="w-16" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Cargando…</TableCell></TableRow>}
-            {!isLoading && (users?.length ?? 0) === 0 && (
-              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Aún no hay usuarios.</TableCell></TableRow>
+            <TableStatusRow colSpan={6} loading={isLoading} />
+            {!isLoading && rows.length === 0 && (
+              <TableStatusRow colSpan={6} empty emptyMessage="Aún no hay usuarios." />
             )}
-            {(users ?? []).map((u) => (
+            {rows.map((u) => (
               <TableRow key={u.id}>
                 <TableCell className="font-medium">{u.full_name ?? "—"}</TableCell>
                 <TableCell>{u.email ?? "—"}</TableCell>
                 <TableCell>{u.roles.map((r) => ROLE_LABEL[r] ?? r).join(", ") || "—"}</TableCell>
                 <TableCell>{u.branch_name ?? "—"}</TableCell>
-                <TableCell>{u.is_active ? <Badge>Activo</Badge> : <Badge variant="secondary">Inactivo</Badge>}</TableCell>
+                <TableCell><ActiveStatusBadge active={u.is_active} /></TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" onClick={() => { setEditing(u as User); setOpen(true); }}>
-                    <Pencil className="h-4 w-4" />
+                    <Icon icon={Edit01Icon} className="h-4 w-4" />
                   </Button>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </Card>
+      </DataTableCard>
 
       <UserDialog open={open} onOpenChange={setOpen} editing={editing} branches={branches ?? []} />
     </div>
@@ -96,6 +169,7 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
   const qc = useQueryClient();
   const create = useServerFn(createUser);
   const update = useServerFn(updateUser);
+  const resetPwd = useServerFn(resetUserPassword);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -104,11 +178,12 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
   const [role, setRole] = useState<string>("supervisor");
   const [branchId, setBranchId] = useState<string>("");
   const [active, setActive] = useState(true);
+  const [newPassword, setNewPassword] = useState("");
 
   const mut = useMutation({
     mutationFn: async () => {
       if (editing) {
-        return update({ data: {
+        await update({ data: {
           id: editing.id,
           full_name: fullName,
           phone: phone || null,
@@ -116,6 +191,10 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
           is_active: active,
           role: role as any,
         }});
+        if (newPassword) {
+          await resetPwd({ data: { id: editing.id, password: newPassword } });
+        }
+        return;
       }
       return create({ data: {
         email, password, full_name: fullName, phone: phone || null,
@@ -136,6 +215,7 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
         setFullName(editing?.full_name ?? "");
         setEmail(editing?.email ?? "");
         setPassword("");
+        setNewPassword("");
         setPhone(editing?.phone ?? "");
         setRole(editing?.roles[0] ?? "supervisor");
         setBranchId(editing?.branch_id ?? "");
@@ -150,7 +230,10 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
           {!editing && (
             <>
               <div className="space-y-1.5"><Label>Correo</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-              <div className="space-y-1.5"><Label>Contraseña</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" /></div>
+              <div className="space-y-1.5">
+                <Label>Contraseña</Label>
+                <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 6 caracteres" />
+              </div>
             </>
           )}
           <div className="space-y-1.5"><Label>Teléfono</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
@@ -177,17 +260,35 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
             </Select>
           </div>
           {editing && (
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <Label>Activo</Label>
-              <Switch checked={active} onCheckedChange={setActive} />
-            </div>
+            <>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label>Activo</Label>
+                <Switch checked={active} onCheckedChange={setActive} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Nueva contraseña</Label>
+                <PasswordInput
+                  value={newPassword}
+                  onChange={setNewPassword}
+                  placeholder="Dejar vacío para no cambiar"
+                />
+                {newPassword && newPassword.length < 6 && (
+                  <p className="text-xs text-destructive">Mínimo 6 caracteres</p>
+                )}
+              </div>
+            </>
           )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button
             onClick={() => mut.mutate()}
-            disabled={mut.isPending || !fullName || (!editing && (!email || !password))}
+            disabled={
+              mut.isPending ||
+              !fullName ||
+              (!editing && (!email || !password)) ||
+              (!!newPassword && newPassword.length < 6)
+            }
           >{mut.isPending ? "Guardando…" : "Guardar"}</Button>
         </DialogFooter>
       </DialogContent>

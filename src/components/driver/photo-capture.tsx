@@ -1,6 +1,8 @@
+import { Camera01Icon, Cancel01Icon, Loading03Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Camera, X, Loader2 } from "lucide-react";
+
 import { useServerFn } from "@tanstack/react-start";
 import { getPhotoUploadUrl } from "@/lib/api/driver.functions";
 import { toast } from "sonner";
@@ -76,7 +78,7 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
             className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
             aria-label="Quitar foto"
           >
-            <X className="h-4 w-4" />
+            <Icon icon={Cancel01Icon} className="h-4 w-4" />
           </button>
         </div>
       ) : hasPhoto ? (
@@ -92,7 +94,7 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
         onClick={() => fileRef.current?.click()}
         disabled={uploading}
       >
-        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+        {uploading ? <Icon icon={Loading03Icon} className="h-4 w-4 animate-spin" /> : <Icon icon={Camera01Icon} className="h-4 w-4" />}
         {hasPhoto ? "Cambiar foto" : "Tomar foto"}
       </Button>
     </div>

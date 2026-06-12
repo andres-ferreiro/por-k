@@ -3,21 +3,29 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { getDashboardSummary } from "@/lib/api/admin.functions";
 import { todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
-import { Truck, PackageCheck, Wallet, Receipt, AlertCircle, Banknote } from "lucide-react";
+import { fmtMoney, fmtQty } from "@/lib/format";
+import { FilterDatePicker, PageHeader } from "@/components/admin/data-table";
+import {
+  StatCardArea,
+  StatCardBar,
+  StatCardSimple,
+  StatGrid,
+} from "@/components/admin/stat-cards";
+
 
 export const Route = createFileRoute("/_authenticated/app/")({
   component: Dashboard,
 });
 
-const fmtMoney = (n: number) =>
-  new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(n || 0);
-const fmtNum = (n: number) =>
-  Number.isInteger(n) ? n.toString() : n.toFixed(2).replace(/\.?0+$/, "");
+function padSeries(values: number[]) {
+  if (values.length >= 2) return values;
+  const v = values[0] ?? 0;
+  return [Math.max(0, v * 0.85), v];
+}
 
 function Dashboard() {
   const [date, setDate] = useState(todayInTZ());
@@ -30,91 +38,100 @@ function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inicio</h1>
-          <p className="text-muted-foreground">Resumen del día.</p>
-        </div>
-        <Input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value || todayInTZ())}
-          className="w-44"
-        />
-      </div>
+      <PageHeader
+        title="Inicio"
+        description="Resumen del día."
+        action={
+          <FilterDatePicker
+            value={date}
+            onChange={(v) => setDate(v || todayInTZ())}
+          />
+        }
+      />
 
       {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
 
       {data && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <KPI
-              icon={<Truck className="h-4 w-4" />}
-              title="Despachos"
-              value={String(data.dispatches.count)}
-              hint={`${fmtNum(data.dispatches.units)} u cargadas`}
+          <StatGrid columns={4}>
+            <StatCardSimple
+              label="Despachos"
+              value={data.dispatches.count}
+              sub={`${fmtQty(data.dispatches.units)} u cargadas`}
             />
-            <KPI
-              icon={<PackageCheck className="h-4 w-4" />}
-              title="Entregas"
-              value={`${data.deliveries.delivered}/${data.deliveries.total}`}
-              hint={`${data.deliveries.pending} pendientes · ${data.deliveries.failed} fallidas`}
+            <StatCardSimple
+              label="Entregas"
+              value={data.deliveries.delivered}
+              displayValue={`${data.deliveries.delivered}/${data.deliveries.total}`}
+              sub={`${data.deliveries.pending} pendientes · ${data.deliveries.failed} fallidas`}
             />
-            <KPI
-              icon={<Wallet className="h-4 w-4" />}
-              title="Ventas del día"
-              value={fmtMoney(data.deliveries.soldAmount)}
-              hint={`${fmtNum(data.deliveries.soldUnits)} u vendidas`}
+            <StatCardArea
+              label="Ventas del día"
+              value={data.deliveries.soldAmount}
+              mode="money"
+              series={padSeries(
+                data.drivers.length
+                  ? data.drivers.map((d) => d.sold)
+                  : [data.deliveries.soldAmount],
+              )}
+              chartLabel="Ventas por repartidor"
             />
-            <KPI
-              icon={<Banknote className="h-4 w-4" />}
-              title="Cobrado"
-              value={fmtMoney(data.payments.collectedTotal)}
-              hint={`${data.payments.count} cobros`}
+            <StatCardArea
+              label="Cobrado"
+              value={data.payments.collectedTotal}
+              mode="money"
+              series={padSeries(
+                data.drivers.length
+                  ? data.drivers.map((d) => d.collected)
+                  : [data.payments.collectedTotal],
+              )}
+              chartLabel="Cobros por repartidor"
             />
-          </div>
+          </StatGrid>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <KPI
-              title="Efectivo"
-              value={fmtMoney(data.payments.byMethod.cash || 0)}
-              hint="cobrado en efectivo"
+          <StatGrid columns={4}>
+            <StatCardBar
+              label="Cobros por método"
+              value={data.payments.collectedTotal}
+              mode="money"
+              bars={[
+                data.payments.byMethod.cash || 0,
+                data.payments.byMethod.transfer || 0,
+                data.payments.byMethod.credit || 0,
+                data.payments.byMethod.other || 0,
+              ]}
+              barLabels={["Efe.", "Trans.", "Créd.", "Otro"]}
+              chartLabel="Distribución de cobros por método"
             />
-            <KPI
-              title="Transferencia"
-              value={fmtMoney(data.payments.byMethod.transfer || 0)}
-              hint="cobrado por transferencia"
+            <StatCardSimple
+              label="Pendiente / crédito"
+              value={data.payments.pendingAmount + (data.payments.byMethod.credit || 0)}
+              mode="money"
+              highlight={(data.payments.pendingAmount + (data.payments.byMethod.credit || 0)) > 0}
+              sub="por cobrar"
+              badge={
+                (data.payments.pendingAmount + (data.payments.byMethod.credit || 0)) > 0
+                  ? "Pendiente"
+                  : undefined
+              }
+              badgeVariant="down"
             />
-            <KPI
-              icon={<AlertCircle className="h-4 w-4" />}
-              title="Pendiente / crédito"
-              value={fmtMoney(data.payments.pendingAmount + (data.payments.byMethod.credit || 0))}
-              hint="por cobrar"
+            <StatCardSimple
+              label="Gastos"
+              value={data.expenses.total}
+              mode="money"
+              sub={`${data.expenses.count} registros`}
             />
-            <KPI
-              icon={<Receipt className="h-4 w-4" />}
-              title="Gastos"
-              value={fmtMoney(data.expenses.total)}
-              hint={`${data.expenses.count} registros`}
+            <StatCardSimple
+              label="Neto en caja"
+              value={data.cashNet}
+              mode="money"
+              highlight={data.cashNet !== 0}
+              sub="efectivo − gastos"
+              badge={data.cashNet < 0 ? "↓ negativo" : data.cashNet > 0 ? "↑ positivo" : undefined}
+              badgeVariant={data.cashNet < 0 ? "down" : data.cashNet > 0 ? "up" : "neutral"}
             />
-          </div>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Neto en caja (efectivo − gastos)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div
-                className={`text-3xl font-semibold tabular-nums ${
-                  data.cashNet < 0 ? "text-destructive" : ""
-                }`}
-              >
-                {fmtMoney(data.cashNet)}
-              </div>
-            </CardContent>
-          </Card>
+          </StatGrid>
 
           <Card>
             <CardHeader>
@@ -147,22 +164,5 @@ function Dashboard() {
         </>
       )}
     </div>
-  );
-}
-
-function KPI({
-  icon, title, value, hint,
-}: { icon?: React.ReactNode; title: string; value: string; hint?: string }) {
-  return (
-    <Card>
-      <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-        {icon && <span className="text-muted-foreground">{icon}</span>}
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-semibold tabular-nums">{value}</div>
-        {hint && <div className="text-xs text-muted-foreground mt-1">{hint}</div>}
-      </CardContent>
-    </Card>
   );
 }

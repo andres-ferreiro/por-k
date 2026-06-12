@@ -1,14 +1,11 @@
+import { Download01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@/components/ui/tabs";
@@ -23,7 +20,10 @@ import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
 import { downloadCSV } from "@/lib/csv";
-import { Download } from "lucide-react";
+
+import {
+  PageHeader, TableToolbar, DataTableCard, FilterSelect, FilterDateRangePicker,
+} from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/app/reports")({
   component: ReportsPage,
@@ -79,49 +79,40 @@ function ReportsPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Reportes</h1>
-        <p className="text-muted-foreground">Ventas, repartidores y clientes.</p>
-      </div>
+    <div className="space-y-4">
+      <PageHeader title="Reportes" description="Ventas, repartidores y clientes." />
 
-      <Card>
-        <CardContent className="pt-6 space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {(["today","yesterday","7d","month","custom"] as Preset[]).map((p) => (
-              <Button key={p} size="sm" variant={preset === p ? "default" : "outline"} onClick={() => applyPreset(p)}>
-                {p === "today" ? "Hoy" : p === "yesterday" ? "Ayer" : p === "7d" ? "Últimos 7 días" : p === "month" ? "Mes actual" : "Personalizado"}
+      <TableToolbar
+        filters={
+          <>
+            {(["today", "yesterday", "7d", "month"] as Preset[]).map((p) => (
+              <Button
+                key={p}
+                size="sm"
+                variant={preset === p ? "secondary" : "ghost"}
+                className="h-10 px-3 text-sm"
+                onClick={() => applyPreset(p)}
+              >
+                {p === "today" ? "Hoy" : p === "yesterday" ? "Ayer" : p === "7d" ? "7 días" : "Mes"}
               </Button>
             ))}
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <Field label="Desde">
-              <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value || today); setPreset("custom"); }} />
-            </Field>
-            <Field label="Hasta">
-              <Input type="date" value={to} onChange={(e) => { setTo(e.target.value || today); setPreset("custom"); }} />
-            </Field>
-            <Field label="Ruta">
-              <Select value={routeId} onValueChange={setRouteId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  {(routes ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Repartidor">
-              <Select value={driverId} onValueChange={setDriverId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  {(drivers ?? []).map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name ?? d.id.slice(0,8)}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-        </CardContent>
-      </Card>
+            <FilterDateRangePicker
+              from={from}
+              to={to}
+              onFromChange={(v) => { setFrom(v || today); setPreset("custom"); }}
+              onToChange={(v) => { setTo(v || today); setPreset("custom"); }}
+            />
+            <FilterSelect value={routeId} onValueChange={setRouteId} placeholder="Ruta">
+              <SelectItem value="all">Todas las rutas</SelectItem>
+              {(routes ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            </FilterSelect>
+            <FilterSelect value={driverId} onValueChange={setDriverId} placeholder="Repartidor">
+              <SelectItem value="all">Todos</SelectItem>
+              {(drivers ?? []).map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name ?? d.id.slice(0, 8)}</SelectItem>)}
+            </FilterSelect>
+          </>
+        }
+      />
 
       <Tabs defaultValue="products">
         <TabsList>
@@ -147,20 +138,19 @@ function ByProduct({ filters }: { filters: Filters }) {
   });
   const total = useMemo(() => (data ?? []).reduce((a, r) => a + r.amount, 0), [data]);
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">Ventas por producto</CardTitle>
+    <DataTableCard>
+      <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
+        <div className="text-sm font-medium">Ventas por producto</div>
         <Button size="sm" variant="outline" disabled={!data?.length} onClick={() => downloadCSV(
           `ventas_producto_${filters.date_from}_${filters.date_to}.csv`,
           (data ?? []).map((r) => ({ producto: r.product_name ?? "", unidad: r.unit ?? "", vendido: r.units_sold, devuelto: r.units_returned, monto: r.amount })),
-        )}><Download className="h-4 w-4 mr-1" />CSV</Button>
-      </CardHeader>
-      <CardContent>
-        {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-        {!isLoading && (data?.length ?? 0) === 0 && <p className="text-sm text-muted-foreground">Sin ventas en este rango.</p>}
+        )}><Icon icon={Download01Icon} className="h-4 w-4 mr-1" />CSV</Button>
+      </div>
+      <div className="p-0">
+        {isLoading && <p className="text-sm text-muted-foreground px-4 py-8">Cargando…</p>}
+        {!isLoading && (data?.length ?? 0) === 0 && <p className="text-sm text-muted-foreground px-4 py-8">Sin ventas en este rango.</p>}
         {(data?.length ?? 0) > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Producto</TableHead>
@@ -184,10 +174,9 @@ function ByProduct({ filters }: { filters: Filters }) {
                 </TableRow>
               </TableBody>
             </Table>
-          </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </DataTableCard>
   );
 }
 
@@ -208,20 +197,19 @@ function ByDriver({ filters }: { filters: Filters }) {
     };
   }, [data]);
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">Ventas por repartidor</CardTitle>
+    <DataTableCard>
+      <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
+        <div className="text-sm font-medium">Ventas por repartidor</div>
         <Button size="sm" variant="outline" disabled={!data?.length} onClick={() => downloadCSV(
           `ventas_repartidor_${filters.date_from}_${filters.date_to}.csv`,
           (data ?? []).map((r) => ({ repartidor: r.driver_name ?? "", vendido: r.sold, cobrado: r.collected, pendiente: r.pending, gastos: r.expenses, neto: r.net })),
-        )}><Download className="h-4 w-4 mr-1" />CSV</Button>
-      </CardHeader>
-      <CardContent>
-        {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-        {!isLoading && (data?.length ?? 0) === 0 && <p className="text-sm text-muted-foreground">Sin actividad en este rango.</p>}
+        )}><Icon icon={Download01Icon} className="h-4 w-4 mr-1" />CSV</Button>
+      </div>
+      <div className="p-0">
+        {isLoading && <p className="text-sm text-muted-foreground px-4 py-8">Cargando…</p>}
+        {!isLoading && (data?.length ?? 0) === 0 && <p className="text-sm text-muted-foreground px-4 py-8">Sin actividad en este rango.</p>}
         {(data?.length ?? 0) > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Repartidor</TableHead>
@@ -253,10 +241,9 @@ function ByDriver({ filters }: { filters: Filters }) {
                 </TableRow>
               </TableBody>
             </Table>
-          </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </DataTableCard>
   );
 }
 
@@ -267,20 +254,19 @@ function ByCustomer({ filters }: { filters: Filters }) {
     queryFn: () => fn({ data: { ...filters, limit: 100 } }),
   });
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">Top clientes</CardTitle>
+    <DataTableCard>
+      <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
+        <div className="text-sm font-medium">Top clientes</div>
         <Button size="sm" variant="outline" disabled={!data?.length} onClick={() => downloadCSV(
           `ventas_cliente_${filters.date_from}_${filters.date_to}.csv`,
           (data ?? []).map((r) => ({ cliente: r.customer_name ?? "", visitas: r.visits, monto: r.amount })),
-        )}><Download className="h-4 w-4 mr-1" />CSV</Button>
-      </CardHeader>
-      <CardContent>
-        {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-        {!isLoading && (data?.length ?? 0) === 0 && <p className="text-sm text-muted-foreground">Sin ventas en este rango.</p>}
+        )}><Icon icon={Download01Icon} className="h-4 w-4 mr-1" />CSV</Button>
+      </div>
+      <div className="p-0">
+        {isLoading && <p className="text-sm text-muted-foreground px-4 py-8">Cargando…</p>}
+        {!isLoading && (data?.length ?? 0) === 0 && <p className="text-sm text-muted-foreground px-4 py-8">Sin ventas en este rango.</p>}
         {(data?.length ?? 0) > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Cliente</TableHead>
@@ -298,18 +284,8 @@ function ByCustomer({ filters }: { filters: Filters }) {
                 ))}
               </TableBody>
             </Table>
-          </div>
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {children}
-    </div>
+      </div>
+    </DataTableCard>
   );
 }

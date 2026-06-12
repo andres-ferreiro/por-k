@@ -1,14 +1,11 @@
+import { Download01Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -17,15 +14,20 @@ import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
+import { useSorting } from "@/hooks/use-sorting";
+import { filterBySearch } from "@/lib/table-utils";
 import { downloadCSV } from "@/lib/csv";
-import { Download } from "lucide-react";
+
+import {
+  PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
+  FilterSelect, FilterDateRangePicker,
+} from "@/components/admin/data-table";
+import { StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
+import { fmtMoney } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/app/expenses")({
   component: ExpensesPage,
 });
-
-const fmtMoney = (n: number) =>
-  new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n || 0);
 
 function ExpensesPage() {
   const today = todayInTZ();
@@ -33,6 +35,8 @@ function ExpensesPage() {
   const [dateTo, setDateTo] = useState(today);
   const [routeId, setRouteId] = useState("all");
   const [driverId, setDriverId] = useState("all");
+  const [search, setSearch] = useState("");
+  const { sortKey, sortDir, toggle, sort } = useSorting("expense_date");
 
   const listFn = useServerFn(listExpensesAdmin);
   const routesFn = useServerFn(listRoutesForDispatch);
@@ -59,13 +63,24 @@ function ExpensesPage() {
       }),
   });
 
-  const total = useMemo(() => (rows ?? []).reduce((a, r) => a + r.amount, 0), [rows]);
+  const tableRows = useMemo(() => {
+    const filtered = filterBySearch(rows ?? [], search, (r) =>
+      [r.driver_name, r.route_name, r.description].filter(Boolean).join(" "),
+    );
+    return sort(filtered, (r, key) => {
+      if (key === "amount") return r.amount;
+      if (key === "created_at") return new Date(r.created_at).getTime();
+      return (r as Record<string, unknown>)[key];
+    });
+  }, [rows, search, sort]);
+
+  const total = useMemo(() => tableRows.reduce((a, r) => a + r.amount, 0), [tableRows]);
 
   function exportCSV() {
-    if (!rows?.length) return;
+    if (!tableRows.length) return;
     downloadCSV(
       `gastos_${dateFrom}_${dateTo}.csv`,
-      rows.map((r) => ({
+      tableRows.map((r) => ({
         fecha: r.expense_date,
         repartidor: r.driver_name ?? "",
         ruta: r.route_name ?? "",
@@ -76,105 +91,82 @@ function ExpensesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Gastos</h1>
-          <p className="text-muted-foreground">Gastos registrados por repartidores.</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={exportCSV} disabled={!rows?.length}>
-          <Download className="h-4 w-4 mr-1" /> Exportar CSV
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader title="Gastos" description="Gastos registrados por repartidores." />
 
-      <Card>
-        <CardContent className="pt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          <Field label="Desde">
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value || today)} />
-          </Field>
-          <Field label="Hasta">
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value || today)} />
-          </Field>
-          <Field label="Ruta">
-            <Select value={routeId} onValueChange={setRouteId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                {(routes ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Repartidor">
-            <Select value={driverId} onValueChange={setDriverId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {(drivers ?? []).map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name ?? d.id.slice(0,8)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-        </CardContent>
-      </Card>
+      <TableToolbar
+        search
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Buscar gastos…"
+        filters={
+          <>
+            <FilterDateRangePicker
+              from={dateFrom}
+              to={dateTo}
+              onFromChange={(v) => setDateFrom(v || today)}
+              onToChange={(v) => setDateTo(v || today)}
+            />
+            <FilterSelect value={routeId} onValueChange={setRouteId} placeholder="Ruta">
+              <SelectItem value="all">Todas las rutas</SelectItem>
+              {(routes ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+            </FilterSelect>
+            <FilterSelect value={driverId} onValueChange={setDriverId} placeholder="Repartidor">
+              <SelectItem value="all">Todos</SelectItem>
+              {(drivers ?? []).map((d) => <SelectItem key={d.id} value={d.id}>{d.full_name ?? d.id.slice(0,8)}</SelectItem>)}
+            </FilterSelect>
+          </>
+        }
+        actions={
+          <Button variant="outline" className="h-10 text-sm" onClick={exportCSV} disabled={!tableRows.length}>
+            <Icon icon={Download01Icon} className="h-3.5 w-3.5 mr-1" /> CSV
+          </Button>
+        }
+      />
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Total del periodo</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-3xl font-semibold tabular-nums">{fmtMoney(total)}</div>
-          <p className="text-xs text-muted-foreground mt-1">{rows?.length ?? 0} registros</p>
-        </CardContent>
-      </Card>
+      <StatGrid className="max-w-sm">
+        <StatCardSimple
+          label="Total del periodo"
+          value={total}
+          mode="money"
+          sub={`${tableRows.length} registros`}
+        />
+      </StatGrid>
 
-      <Card>
-        <CardContent className="pt-6">
-          {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-          {!isLoading && (rows?.length ?? 0) === 0 && (
-            <p className="text-sm text-muted-foreground">Sin gastos para los filtros seleccionados.</p>
-          )}
-          {(rows?.length ?? 0) > 0 && (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Repartidor</TableHead>
-                    <TableHead>Ruta</TableHead>
-                    <TableHead>Descripción</TableHead>
-                    <TableHead>Foto</TableHead>
-                    <TableHead className="text-right">Monto</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(rows ?? []).map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="whitespace-nowrap text-xs">
-                        {new Date(r.created_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
-                      </TableCell>
-                      <TableCell>{r.driver_name ?? "—"}</TableCell>
-                      <TableCell>{r.route_name ?? "—"}</TableCell>
-                      <TableCell className="max-w-[300px] truncate">{r.description}</TableCell>
-                      <TableCell>
-                        {r.photo_url ? <span className="text-xs text-muted-foreground">📷</span> : "—"}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.amount)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {children}
+      <DataTableCard>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortableTableHead label="Fecha" sortKey="created_at" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Repartidor" sortKey="driver_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Ruta" sortKey="route_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Descripción" sortKey="description" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <TableHead>Foto</TableHead>
+              <SortableTableHead label="Monto" sortKey="amount" activeKey={sortKey} direction={sortDir} onSort={toggle} className="text-right" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableStatusRow colSpan={6} loading={isLoading} />
+            {!isLoading && tableRows.length === 0 && (
+              <TableStatusRow colSpan={6} empty emptyMessage="Sin gastos para los filtros seleccionados." />
+            )}
+            {tableRows.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="whitespace-nowrap text-xs">
+                  {new Date(r.created_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
+                </TableCell>
+                <TableCell>{r.driver_name ?? "—"}</TableCell>
+                <TableCell>{r.route_name ?? "—"}</TableCell>
+                <TableCell className="max-w-[300px] truncate">{r.description}</TableCell>
+                <TableCell>
+                  {r.photo_url ? <span className="text-xs text-muted-foreground">📷</span> : "—"}
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.amount)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </DataTableCard>
     </div>
   );
 }

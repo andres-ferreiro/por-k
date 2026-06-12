@@ -30,10 +30,32 @@ export const listCustomers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("customers")
-      .select("id, branch_id, name, phone, address, lat, lng, photo_url, notes, is_active, branches(name)")
+      .select("id, branch_id, name, phone, address, lat, lng, photo_url, notes, is_active, created_at, import_batch_id, import_position, branches(name)")
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
     return (data ?? []).map((c: any) => ({ ...c, branch_name: c.branches?.name ?? null }));
+  });
+
+export const listCustomerImportBatches = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ branch_id: z.string().uuid().nullable().optional(), limit: z.number().int().min(1).max(50).optional() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const branch_id = await resolveBranchId(context.supabase, context.userId, data.branch_id ?? null);
+    const { data: batches, error } = await context.supabase
+      .from("customer_import_batches")
+      .select("id, label, created_at, customers(count)")
+      .eq("branch_id", branch_id)
+      .order("created_at", { ascending: false })
+      .limit(data.limit ?? 20);
+    if (error) throw new Error(error.message);
+    return (batches ?? []).map((b: any) => ({
+      id: b.id,
+      label: b.label,
+      created_at: b.created_at,
+      customer_count: b.customers?.[0]?.count ?? 0,
+    }));
   });
 
 const customerInput = z.object({
@@ -68,6 +90,61 @@ export const createCustomer = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     return row;
+  });
+
+const bulkCustomerRow = z.object({
+  name: z.string().trim().min(1).max(120),
+  phone: z.string().max(50).nullable().optional(),
+  address: z.string().max(255).nullable().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+});
+
+export const bulkCreateCustomers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      branch_id: z.string().uuid().nullable().optional(),
+      import_label: z.string().max(200).nullable().optional(),
+      customers: z.array(bulkCustomerRow).min(1).max(500),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const branch_id = await resolveBranchId(context.supabase, context.userId, data.branch_id ?? null);
+
+    const { data: batch, error: batchErr } = await context.supabase
+      .from("customer_import_batches")
+      .insert({
+        branch_id,
+        label: data.import_label ?? null,
+        created_by: context.userId,
+      })
+      .select("id")
+      .single();
+    if (batchErr || !batch) throw new Error(batchErr?.message ?? "No se pudo registrar la importación.");
+
+    const rows = data.customers.map((c, i) => ({
+      branch_id,
+      import_batch_id: batch.id,
+      import_position: i,
+      name: c.name,
+      phone: c.phone ?? null,
+      address: c.address ?? null,
+      lat: c.lat ?? null,
+      lng: c.lng ?? null,
+      notes: c.notes ?? null,
+    }));
+    const { data: inserted, error } = await context.supabase
+      .from("customers")
+      .insert(rows)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return {
+      count: inserted?.length ?? 0,
+      batch_id: batch.id,
+      customer_ids: (inserted ?? []).map((r: { id: string }) => r.id),
+    };
   });
 
 export const updateCustomer = createServerFn({ method: "POST" })

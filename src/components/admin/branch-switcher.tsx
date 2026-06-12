@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Building2 } from "lucide-react";
+import { Building03Icon } from "@hugeicons/core-free-icons";
+import { Icon } from "@/components/ui/icon";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -29,9 +30,9 @@ export function BranchSwitcher({
 
   if (!isOwner) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Building2 className="h-4 w-4" />
-        <span>{ownBranchName ?? "Sin sucursal"}</span>
+      <div className="flex items-center gap-2 text-sm text-foreground">
+        <Icon icon={Building03Icon} className="h-4 w-4 text-primary" />
+        <span className="font-medium">{ownBranchName ?? "Sin sucursal"}</span>
       </div>
     );
   }
@@ -40,16 +41,16 @@ export function BranchSwitcher({
 
   return (
     <div className="flex items-center gap-2">
-      <Building2 className="h-4 w-4 text-muted-foreground" />
+      <Icon icon={Building03Icon} className="h-4 w-4 text-primary shrink-0" />
       <Select
         value={value}
         onValueChange={(v) => setBranchId(v === ALL ? null : v)}
       >
-        <SelectTrigger className="h-8 w-56 text-sm">
-          <SelectValue placeholder="Toda la empresa" />
+        <SelectTrigger className="h-8 w-auto min-w-[160px] max-w-[220px] text-sm border-0 bg-transparent shadow-none px-2 font-medium focus-visible:ring-0 focus-visible:border-0">
+          <SelectValue placeholder="Todas las sucursales" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>Toda la empresa</SelectItem>
+          <SelectItem value={ALL}>Todas las sucursales</SelectItem>
           {(branches ?? []).map((b: any) => (
             <SelectItem key={b.id} value={b.id}>
               {b.name}

@@ -8,9 +8,25 @@ export const listProducts = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("products")
       .select("*")
-      .order("name");
+      .order("display_order", { ascending: true })
+      .order("name", { ascending: true });
     if (error) throw new Error(error.message);
     return data ?? [];
+  });
+
+export const setProductOrder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ product_ids: z.array(z.string().uuid()).min(1).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const updates = data.product_ids.map((id, i) =>
+      context.supabase.from("products").update({ display_order: i }).eq("id", id),
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r.error);
+    if (failed?.error) throw new Error(failed.error.message);
+    return { ok: true };
   });
 
 const productInput = z.object({
@@ -18,15 +34,23 @@ const productInput = z.object({
   unit: z.string().min(1).max(40),
   price: z.number().min(0).max(10_000_000).optional(),
   is_active: z.boolean().optional(),
+  allow_returns: z.boolean().optional(),
 });
 
 export const createProduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => productInput.parse(d))
   .handler(async ({ data, context }) => {
+    const { data: last } = await context.supabase
+      .from("products")
+      .select("display_order")
+      .order("display_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const display_order = (last?.display_order ?? -1) + 1;
     const { data: row, error } = await context.supabase
       .from("products")
-      .insert(data)
+      .insert({ ...data, display_order })
       .select()
       .single();
     if (error) throw new Error(error.message);
