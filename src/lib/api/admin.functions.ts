@@ -1,8 +1,18 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { todayInTZ, tzDayRange } from "@/lib/tz";
+import {
+  todayInTZ,
+  tzDayRange,
+  tzWallToUtcISO,
+  dateStrInTZ,
+  hourInTZ,
+  hourLabelShort,
+  monthLabelShort,
+} from "@/lib/tz";
+import type { DashboardTrend, TrendBucket } from "@/lib/dashboard-trend";
 import { deliveryNetTotals } from "@/lib/delivery-totals";
+import { computeRouteEfficiency, type EfficiencyStop } from "@/lib/route-efficiency";
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
 const branchIdField = z.string().uuid().optional().nullable();
@@ -194,7 +204,7 @@ export const getDailyTotals = createServerFn({ method: "POST" })
 
     let payQ = supabase
       .from("payments")
-      .select("paid_at, amount, status, delivery_id, deliveries(delivery_items(line_total))")
+      .select("paid_at, amount")
       .gte("paid_at", startISO)
       .lt("paid_at", endISO)
       .eq("status", "paid");
@@ -241,14 +251,242 @@ export const getDailyTotals = createServerFn({ method: "POST" })
       const day = dayBoundaries.find((b) => paidAt >= b.startISO && paidAt < b.endISO);
       if (!day) continue;
       const entry = spine.get(day.date)!;
-      const items = (row as any).deliveries?.delivery_items ?? [];
-      const total = items.length > 0
-        ? items.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0)
-        : Number((row as any).amount ?? 0);
-      entry.collected += total;
+      entry.collected += Number((row as any).amount ?? 0);
     }
 
     return Array.from(spine.values());
+  });
+
+function daysBetweenInclusive(from: string, to: string): number {
+  const a = new Date(from + "T12:00:00Z");
+  const b = new Date(to + "T12:00:00Z");
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
+}
+
+function trendGranularity(dateFrom: string, dateTo: string): DashboardTrend["granularity"] {
+  if (dateFrom === dateTo) return "hour";
+  if (daysBetweenInclusive(dateFrom, dateTo) > 62) return "month";
+  return "day";
+}
+
+function emptyTrendBucket(label: string): TrendBucket {
+  return {
+    label,
+    sold: 0,
+    collected: 0,
+    delivered: 0,
+    failed: 0,
+    pending: 0,
+    dispatches: 0,
+    dispatchUnits: 0,
+    soldUnits: 0,
+    expenses: 0,
+    cashNet: 0,
+    pendingCredit: 0,
+  };
+}
+
+function buildTrendSpine(
+  granularity: DashboardTrend["granularity"],
+  dateFrom: string,
+  dateTo: string,
+): Map<string, TrendBucket> {
+  const spine = new Map<string, TrendBucket>();
+
+  if (granularity === "hour") {
+    for (let h = 0; h < 24; h++) {
+      spine.set(String(h), emptyTrendBucket(hourLabelShort(h)));
+    }
+    return spine;
+  }
+
+  if (granularity === "day") {
+    const cur = new Date(dateFrom + "T12:00:00Z");
+    const end = new Date(dateTo + "T12:00:00Z");
+    while (cur <= end) {
+      const d = cur.toISOString().slice(0, 10);
+      spine.set(d, emptyTrendBucket(d.slice(5)));
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return spine;
+  }
+
+  const startMonth = dateFrom.slice(0, 7);
+  const endMonth = dateTo.slice(0, 7);
+  let y = Number(startMonth.slice(0, 4));
+  let m = Number(startMonth.slice(5, 7));
+  const endY = Number(endMonth.slice(0, 4));
+  const endM = Number(endMonth.slice(5, 7));
+  while (y < endY || (y === endY && m <= endM)) {
+    const key = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`;
+    spine.set(key, emptyTrendBucket(monthLabelShort(key)));
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return spine;
+}
+
+export const getDashboardTrend = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date_from: dateStr, date_to: dateStr, branch_id: branchIdField }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }): Promise<DashboardTrend> => {
+    const { supabase } = context;
+    const { startISO } = tzDayRange(data.date_from);
+    const { endISO } = tzDayRange(data.date_to);
+    const bid = data.branch_id ?? null;
+    const granularity = trendGranularity(data.date_from, data.date_to);
+    const spine = buildTrendSpine(granularity, data.date_from, data.date_to);
+
+    const bucketForDate = (dateStr: string) => {
+      if (granularity === "day") return spine.get(dateStr);
+      if (granularity === "month") return spine.get(dateStr.slice(0, 7));
+      return undefined;
+    };
+
+    const bucketForInstant = (iso: string) => {
+      if (granularity === "hour") return spine.get(String(hourInTZ(iso)));
+      return bucketForDate(dateStrInTZ(iso));
+    };
+
+    let dispQ = supabase
+      .from("dispatches")
+      .select("dispatched_at, dispatch_items(quantity)")
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO);
+    if (bid) dispQ = dispQ.eq("branch_id", bid);
+
+    let delQ = supabase
+      .from("deliveries")
+      .select(
+        "delivery_date, created_at, status, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)",
+      )
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to);
+    if (bid) delQ = delQ.eq("branch_id", bid);
+
+    let payQ = supabase
+      .from("payments")
+      .select("paid_at, amount, status, method")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO);
+    if (bid) payQ = payQ.eq("branch_id", bid);
+
+    let pendQ = supabase
+      .from("payments")
+      .select("created_at, amount, method")
+      .gte("created_at", startISO)
+      .lt("created_at", endISO)
+      .eq("status", "pending");
+    if (bid) pendQ = pendQ.eq("branch_id", bid);
+
+    let expQ = supabase
+      .from("expenses")
+      .select("created_at, expense_date, amount")
+      .gte("expense_date", data.date_from)
+      .lte("expense_date", data.date_to);
+    if (bid) expQ = expQ.eq("branch_id", bid);
+
+    const [dispRes, delRes, payRes, pendRes, expRes] = await Promise.all([
+      dispQ, delQ, payQ, pendQ, expQ,
+    ]);
+    for (const r of [dispRes, delRes, payRes, pendRes, expRes]) {
+      if (r.error) throw new Error(r.error.message);
+    }
+
+    for (const row of dispRes.data ?? []) {
+      const entry = bucketForInstant((row as any).dispatched_at as string);
+      if (!entry) continue;
+      entry.dispatches += 1;
+      entry.dispatchUnits += ((row as any).dispatch_items ?? []).reduce(
+        (a: number, i: any) => a + Number(i.quantity ?? 0),
+        0,
+      );
+    }
+
+    for (const row of delRes.data ?? []) {
+      const r = row as any;
+      const bucketKey =
+        granularity === "hour"
+          ? String(hourInTZ(r.created_at as string))
+          : granularity === "day"
+            ? (r.delivery_date as string)
+            : (r.delivery_date as string).slice(0, 7);
+      const entry = spine.get(bucketKey);
+      if (!entry) continue;
+
+      if (r.status === "delivered") {
+        entry.delivered += 1;
+        const totals = deliveryNetTotals(r.delivery_items ?? [], r.delivery_returns ?? []);
+        entry.sold += totals.netAmount;
+        entry.soldUnits += totals.netUnits;
+      } else if (r.status === "failed") {
+        entry.failed += 1;
+      } else {
+        entry.pending += 1;
+      }
+    }
+
+    const cashByBucket = new Map<string, number>();
+    const addCash = (key: string, amount: number) => {
+      cashByBucket.set(key, (cashByBucket.get(key) ?? 0) + amount);
+    };
+
+    for (const row of payRes.data ?? []) {
+      const r = row as any;
+      if (r.status !== "paid") continue;
+      const iso = r.paid_at as string;
+      const key =
+        granularity === "hour"
+          ? String(hourInTZ(iso))
+          : granularity === "day"
+            ? dateStrInTZ(iso)
+            : dateStrInTZ(iso).slice(0, 7);
+      const entry = spine.get(key);
+      if (!entry) continue;
+      const amt = Number(r.amount ?? 0);
+      entry.collected += amt;
+      if (r.method === "cash") addCash(key, amt);
+      if (r.method === "credit") entry.pendingCredit += amt;
+    }
+
+    for (const row of pendRes.data ?? []) {
+      const r = row as any;
+      const iso = r.created_at as string;
+      const key =
+        granularity === "hour"
+          ? String(hourInTZ(iso))
+          : granularity === "day"
+            ? dateStrInTZ(iso)
+            : dateStrInTZ(iso).slice(0, 7);
+      const entry = spine.get(key);
+      if (!entry) continue;
+      entry.pendingCredit += Number(r.amount ?? 0);
+    }
+
+    for (const row of expRes.data ?? []) {
+      const r = row as any;
+      const iso = (r.created_at as string) ?? tzWallToUtcISO(r.expense_date as string, "12:00:00");
+      const key =
+        granularity === "hour"
+          ? String(hourInTZ(iso))
+          : granularity === "day"
+            ? (r.expense_date as string)
+            : (r.expense_date as string).slice(0, 7);
+      const entry = spine.get(key);
+      if (!entry) continue;
+      entry.expenses += Number(r.amount ?? 0);
+    }
+
+    for (const [key, entry] of spine) {
+      entry.cashNet = (cashByBucket.get(key) ?? 0) - entry.expenses;
+    }
+
+    return { granularity, buckets: Array.from(spine.values()) };
   });
 
 // ============ DELIVERIES ============
@@ -748,4 +986,521 @@ export const clearDayMovements = createServerFn({ method: "POST" })
       branch_id: branchId,
       deleted: { payments, deliveries, expenses, dispatches },
     };
+  });
+
+// ============ LIVE OPERATIONS ============
+
+export type LiveStopStatus = "unvisited" | "pending" | "delivered" | "failed";
+
+export const getLiveOperations = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      branch_id: branchIdField,
+      route_id: z.string().uuid().optional().nullable(),
+    }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const today = todayInTZ();
+    const bid = data.branch_id ?? null;
+    const { startISO, endISO } = tzDayRange(today);
+
+    let routesQ = supabase
+      .from("routes")
+      .select("id, name, driver_id, branch_id")
+      .eq("is_active", true)
+      .order("name");
+    if (bid) routesQ = routesQ.eq("branch_id", bid);
+    if (data.route_id) routesQ = routesQ.eq("id", data.route_id);
+
+    let dispatchesQ = supabase
+      .from("dispatches")
+      .select("id, route_id, driver_id, dispatched_at")
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO);
+    if (bid) dispatchesQ = dispatchesQ.eq("branch_id", bid);
+    if (data.route_id) dispatchesQ = dispatchesQ.eq("route_id", data.route_id);
+
+    let deliveriesQ = supabase
+      .from("deliveries")
+      .select(
+        "id, status, route_id, driver_id, customer_id, delivery_date, created_at, updated_at, comment, routes(name), customers(name, address, lat, lng), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, method, status, paid_at)",
+      )
+      .eq("delivery_date", today)
+      .order("updated_at", { ascending: false });
+    if (bid) deliveriesQ = deliveriesQ.eq("branch_id", bid);
+    if (data.route_id) deliveriesQ = deliveriesQ.eq("route_id", data.route_id);
+
+    let paymentsQ = supabase
+      .from("payments")
+      .select("id, amount, method, status, paid_at, note, route_id, customer_id, driver_id, delivery_id, routes(name), customers(name)")
+      .gte("paid_at", startISO)
+      .lt("paid_at", endISO)
+      .order("paid_at", { ascending: false })
+      .limit(30);
+    if (bid) paymentsQ = paymentsQ.eq("branch_id", bid);
+    if (data.route_id) paymentsQ = paymentsQ.eq("route_id", data.route_id);
+
+    let expensesQ = supabase
+      .from("expenses")
+      .select("id, amount, description, created_at, route_id, driver_id, routes(name)")
+      .eq("expense_date", today)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (bid) expensesQ = expensesQ.eq("branch_id", bid);
+    if (data.route_id) expensesQ = expensesQ.eq("route_id", data.route_id);
+
+    const [routesRes, dispatchesRes, deliveriesRes, paymentsRes, expensesRes] = await Promise.all([
+      routesQ,
+      dispatchesQ,
+      deliveriesQ,
+      paymentsQ,
+      expensesQ,
+    ]);
+
+    for (const r of [routesRes, dispatchesRes, deliveriesRes, paymentsRes, expensesRes]) {
+      if (r.error) throw new Error(r.error.message);
+    }
+
+    const routes = routesRes.data ?? [];
+    const routeIds = routes.map((r: any) => r.id as string);
+
+    let routeCustomers: any[] = [];
+    if (routeIds.length > 0) {
+      const { data: rc, error: rcErr } = await supabase
+        .from("route_customers")
+        .select("route_id, position, customer_id, customers(id, name, address, lat, lng)")
+        .in("route_id", routeIds)
+        .order("position", { ascending: true });
+      if (rcErr) throw new Error(rcErr.message);
+      routeCustomers = rc ?? [];
+    }
+
+    const dispatches = dispatchesRes.data ?? [];
+    const dispatchByRoute = new Map(dispatches.map((d: any) => [d.route_id as string, d]));
+
+    const deliveries = deliveriesRes.data ?? [];
+    const deliveryByRouteCustomer = new Map<string, any>();
+    for (const d of deliveries) {
+      deliveryByRouteCustomer.set(`${(d as any).route_id}:${(d as any).customer_id}`, d);
+    }
+
+    const driverIds = Array.from(
+      new Set([
+        ...routes.map((r: any) => r.driver_id),
+        ...deliveries.map((d: any) => d.driver_id),
+        ...paymentsRes.data?.map((p: any) => p.driver_id) ?? [],
+        ...expensesRes.data?.map((e: any) => e.driver_id) ?? [],
+      ].filter(Boolean)),
+    ) as string[];
+    const names = await fetchProfileNames(driverIds);
+
+    type StopRow = {
+      route_id: string;
+      route_name: string;
+      driver_id: string | null;
+      driver_name: string | null;
+      position: number;
+      customer_id: string;
+      customer_name: string;
+      address: string | null;
+      lat: number | null;
+      lng: number | null;
+      status: LiveStopStatus;
+      delivery_id: string | null;
+      total: number;
+      updated_at: string | null;
+      payment_status: "paid" | "pending" | null;
+    };
+
+    const stops: StopRow[] = [];
+    for (const rc of routeCustomers) {
+      const route = routes.find((r: any) => r.id === rc.route_id);
+      if (!route) continue;
+      const c = rc.customers;
+      if (!c) continue;
+      const del = deliveryByRouteCustomer.get(`${rc.route_id}:${rc.customer_id}`);
+      let status: LiveStopStatus = "unvisited";
+      let total = 0;
+      let paymentStatus: "paid" | "pending" | null = null;
+      if (del) {
+        status = del.status as LiveStopStatus;
+        const totals = deliveryNetTotals(del.delivery_items ?? [], del.delivery_returns ?? []);
+        total = totals.netAmount;
+        const pay = (del.payments ?? []).find((p: any) => p.delivery_id === del.id) ?? del.payments?.[0];
+        paymentStatus = pay?.status ?? null;
+      }
+      stops.push({
+        route_id: rc.route_id as string,
+        route_name: route.name as string,
+        driver_id: (route.driver_id as string | null) ?? null,
+        driver_name: route.driver_id ? names.get(route.driver_id as string) ?? null : null,
+        position: rc.position as number,
+        customer_id: c.id as string,
+        customer_name: c.name as string,
+        address: (c.address as string | null) ?? null,
+        lat: c.lat as number | null,
+        lng: c.lng as number | null,
+        status,
+        delivery_id: del?.id ?? null,
+        total,
+        updated_at: del?.updated_at ?? null,
+        payment_status: paymentStatus,
+      });
+    }
+
+    const routeSummaries = routes.map((r: any) => {
+      const routeStops = stops.filter((s) => s.route_id === r.id);
+      const delivered = routeStops.filter((s) => s.status === "delivered").length;
+      const pending = routeStops.filter((s) => s.status === "pending").length;
+      const failed = routeStops.filter((s) => s.status === "failed").length;
+      const unvisited = routeStops.filter((s) => s.status === "unvisited").length;
+      const total = routeStops.length;
+      const dispatch = dispatchByRoute.get(r.id);
+      const efficiencyStops: EfficiencyStop[] = routeStops.map((s) => ({
+        customer_id: s.customer_id,
+        position: s.position,
+        status: s.status,
+        updated_at: s.updated_at,
+      }));
+      const eff = computeRouteEfficiency(
+        efficiencyStops,
+        (dispatch?.dispatched_at as string | undefined) ?? null,
+      );
+      return {
+        id: r.id as string,
+        name: r.name as string,
+        driver_id: (r.driver_id as string | null) ?? null,
+        driver_name: r.driver_id ? names.get(r.driver_id as string) ?? null : null,
+        dispatched: !!dispatch,
+        dispatched_at: dispatch?.dispatched_at ?? null,
+        total_stops: total,
+        delivered,
+        pending,
+        failed,
+        unvisited,
+        progress_pct: eff.completion_pct,
+        ...eff,
+      };
+    });
+
+    const kanban = {
+      unvisited: stops.filter((s) => s.status === "unvisited"),
+      pending: stops.filter((s) => s.status === "pending"),
+      delivered: stops.filter((s) => s.status === "delivered"),
+      failed: stops.filter((s) => s.status === "failed"),
+    };
+
+    const deliveryNetById = new Map<string, number>();
+    for (const d of deliveries) {
+      const totals = deliveryNetTotals((d as any).delivery_items ?? [], (d as any).delivery_returns ?? []);
+      deliveryNetById.set((d as any).id, totals.netAmount);
+    }
+
+    const recentPayments = (paymentsRes.data ?? []).map((p: any) => ({
+      id: p.id as string,
+      amount: p.delivery_id
+        ? deliveryNetById.get(p.delivery_id as string) ?? Number(p.amount)
+        : Number(p.amount),
+      method: p.method as string,
+      status: p.status as "paid" | "pending",
+      paid_at: p.paid_at as string,
+      customer_name: p.customers?.name ?? null,
+      route_name: p.routes?.name ?? null,
+      driver_name: names.get(p.driver_id) ?? null,
+    }));
+
+    const recentExpenses = (expensesRes.data ?? []).map((e: any) => ({
+      id: e.id as string,
+      amount: Number(e.amount),
+      description: e.description as string,
+      created_at: e.created_at as string,
+      route_name: e.routes?.name ?? null,
+      driver_name: names.get(e.driver_id) ?? null,
+    }));
+
+    type ActivityItem = {
+      id: string;
+      type: "delivery" | "payment" | "expense" | "dispatch";
+      at: string;
+      title: string;
+      subtitle: string;
+      amount: number | null;
+      status: string | null;
+    };
+
+    const activity: ActivityItem[] = [];
+
+    for (const d of deliveries) {
+      const totals = deliveryNetTotals((d as any).delivery_items ?? [], (d as any).delivery_returns ?? []);
+      const statusLabel =
+        d.status === "delivered" ? "Entrega completada" : d.status === "failed" ? "Visita fallida" : "Visita pendiente";
+      activity.push({
+        id: `del-${d.id}`,
+        type: "delivery",
+        at: (d as any).updated_at as string,
+        title: statusLabel,
+        subtitle: `${(d as any).customers?.name ?? "Cliente"} · ${(d as any).routes?.name ?? "Ruta"}`,
+        amount: d.status === "delivered" ? totals.netAmount : null,
+        status: d.status as string,
+      });
+    }
+
+    for (const p of paymentsRes.data ?? []) {
+      activity.push({
+        id: `pay-${(p as any).id}`,
+        type: "payment",
+        at: (p as any).paid_at as string,
+        title: (p as any).status === "paid" ? "Pago registrado" : "Pago pendiente",
+        subtitle: `${(p as any).customers?.name ?? "Cliente"} · ${(p as any).routes?.name ?? "Ruta"}`,
+        amount: (p as any).delivery_id
+          ? deliveryNetById.get((p as any).delivery_id as string) ?? Number((p as any).amount)
+          : Number((p as any).amount),
+        status: (p as any).status as string,
+      });
+    }
+
+    for (const e of expensesRes.data ?? []) {
+      activity.push({
+        id: `exp-${(e as any).id}`,
+        type: "expense",
+        at: (e as any).created_at as string,
+        title: "Gasto registrado",
+        subtitle: `${(e as any).description} · ${(e as any).routes?.name ?? "Ruta"}`,
+        amount: Number((e as any).amount),
+        status: null,
+      });
+    }
+
+    for (const d of dispatches) {
+      const route = routes.find((r: any) => r.id === d.route_id);
+      activity.push({
+        id: `disp-${d.id}`,
+        type: "dispatch",
+        at: d.dispatched_at as string,
+        title: "Despacho registrado",
+        subtitle: route?.name ?? "Ruta",
+        amount: null,
+        status: null,
+      });
+    }
+
+    activity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+    const paidTotal = recentPayments
+      .filter((p) => p.status === "paid")
+      .reduce((a, p) => a + p.amount, 0);
+    const expenseTotal = recentExpenses.reduce((a, e) => a + e.amount, 0);
+
+    const routesWithThroughput = routeSummaries.filter((r) => r.stops_per_hour != null);
+    const routesWithSequence = routeSummaries.filter((r) => r.sequence_score != null);
+    const avg_stops_per_hour =
+      routesWithThroughput.length > 0
+        ? Math.round(
+            (routesWithThroughput.reduce((a, r) => a + (r.stops_per_hour ?? 0), 0) /
+              routesWithThroughput.length) *
+              10,
+          ) / 10
+        : null;
+    const avg_sequence_score =
+      routesWithSequence.length > 0
+        ? Math.round(
+            routesWithSequence.reduce((a, r) => a + (r.sequence_score ?? 0), 0) /
+              routesWithSequence.length,
+          )
+        : null;
+
+    return {
+      date: today,
+      fetched_at: new Date().toISOString(),
+      summary: {
+        active_routes: routes.length,
+        dispatched_routes: dispatches.length,
+        total_stops: stops.length,
+        delivered: kanban.delivered.length,
+        pending: kanban.pending.length,
+        failed: kanban.failed.length,
+        unvisited: kanban.unvisited.length,
+        collected: paidTotal,
+        expenses: expenseTotal,
+        avg_stops_per_hour,
+        avg_sequence_score,
+      },
+      routes: routeSummaries,
+      stops,
+      kanban,
+      recent_payments: recentPayments,
+      recent_expenses: recentExpenses,
+      activity: activity.slice(0, 50),
+    };
+  });
+
+export const getRouteEfficiencyReport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    dateRangeSchema.parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const bid = data.branch_id ?? null;
+    const { startISO } = tzDayRange(data.date_from);
+    const { endISO } = tzDayRange(data.date_to);
+
+    let routesQ = supabase
+      .from("routes")
+      .select("id, name, driver_id, branch_id")
+      .eq("is_active", true)
+      .order("name");
+    if (bid) routesQ = routesQ.eq("branch_id", bid);
+    if (data.route_id) routesQ = routesQ.eq("id", data.route_id);
+    if (data.driver_id) routesQ = routesQ.eq("driver_id", data.driver_id);
+
+    let deliveriesQ = supabase
+      .from("deliveries")
+      .select("id, route_id, customer_id, driver_id, delivery_date, status, updated_at")
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to);
+    if (bid) deliveriesQ = deliveriesQ.eq("branch_id", bid);
+    if (data.route_id) deliveriesQ = deliveriesQ.eq("route_id", data.route_id);
+    if (data.driver_id) deliveriesQ = deliveriesQ.eq("driver_id", data.driver_id);
+
+    let dispatchesQ = supabase
+      .from("dispatches")
+      .select("id, route_id, driver_id, dispatched_at")
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO);
+    if (bid) dispatchesQ = dispatchesQ.eq("branch_id", bid);
+    if (data.route_id) dispatchesQ = dispatchesQ.eq("route_id", data.route_id);
+    if (data.driver_id) dispatchesQ = dispatchesQ.eq("driver_id", data.driver_id);
+
+    const [routesRes, deliveriesRes, dispatchesRes] = await Promise.all([
+      routesQ,
+      deliveriesQ,
+      dispatchesQ,
+    ]);
+
+    for (const r of [routesRes, deliveriesRes, dispatchesRes]) {
+      if (r.error) throw new Error(r.error.message);
+    }
+
+    const routes = routesRes.data ?? [];
+    const routeIds = routes.map((r: any) => r.id as string);
+    const deliveries = deliveriesRes.data ?? [];
+    const dispatches = dispatchesRes.data ?? [];
+
+    let routeCustomers: any[] = [];
+    if (routeIds.length > 0) {
+      const { data: rc, error: rcErr } = await supabase
+        .from("route_customers")
+        .select("route_id, position, customer_id")
+        .in("route_id", routeIds)
+        .order("position", { ascending: true });
+      if (rcErr) throw new Error(rcErr.message);
+      routeCustomers = rc ?? [];
+    }
+
+    const driverIds = Array.from(
+      new Set([
+        ...routes.map((r: any) => r.driver_id),
+        ...deliveries.map((d: any) => d.driver_id),
+      ].filter(Boolean)),
+    ) as string[];
+    const names = await fetchProfileNames(driverIds);
+
+    const routeMap = new Map(routes.map((r: any) => [r.id as string, r]));
+    const rcByRoute = new Map<string, any[]>();
+    for (const rc of routeCustomers) {
+      const list = rcByRoute.get(rc.route_id as string) ?? [];
+      list.push(rc);
+      rcByRoute.set(rc.route_id as string, list);
+    }
+
+    const deliveriesByDayRoute = new Map<string, any[]>();
+    for (const d of deliveries) {
+      const key = `${d.delivery_date}:${d.route_id}`;
+      const list = deliveriesByDayRoute.get(key) ?? [];
+      list.push(d);
+      deliveriesByDayRoute.set(key, list);
+    }
+
+    function dispatchForDay(routeId: string, day: string) {
+      const { startISO: dayStart, endISO: dayEnd } = tzDayRange(day);
+      return dispatches.find(
+        (disp: any) =>
+          disp.route_id === routeId &&
+          disp.dispatched_at >= dayStart &&
+          disp.dispatched_at < dayEnd,
+      );
+    }
+
+    const dayKeys = new Set<string>();
+    for (const d of deliveries) dayKeys.add(`${d.delivery_date}:${d.route_id}`);
+    for (const disp of dispatches) {
+      const day = dateStrInTZ(disp.dispatched_at as string);
+      if (day >= data.date_from && day <= data.date_to) {
+        dayKeys.add(`${day}:${disp.route_id}`);
+      }
+    }
+
+    const rows: Array<{
+      date: string;
+      route_id: string;
+      route_name: string;
+      driver_id: string | null;
+      driver_name: string | null;
+      dispatched: boolean;
+      total_stops: number;
+      completed_stops: number;
+      completion_pct: number;
+      failed_pct: number;
+      active_minutes: number | null;
+      stops_per_hour: number | null;
+      avg_minutes_per_stop: number | null;
+      sequence_score: number | null;
+    }> = [];
+
+    for (const key of dayKeys) {
+      const [day, routeId] = key.split(":");
+      const route = routeMap.get(routeId);
+      if (!route) continue;
+
+      const dayDeliveries = deliveriesByDayRoute.get(key) ?? [];
+      const delMap = new Map(dayDeliveries.map((d: any) => [d.customer_id as string, d]));
+      const rcList = rcByRoute.get(routeId) ?? [];
+
+      const efficiencyStops: EfficiencyStop[] = rcList.map((rc: any) => {
+        const del = delMap.get(rc.customer_id as string);
+        let status: EfficiencyStop["status"] = "unvisited";
+        if (del) status = del.status as EfficiencyStop["status"];
+        return {
+          customer_id: rc.customer_id as string,
+          position: rc.position as number,
+          status,
+          updated_at: del?.updated_at ?? null,
+        };
+      });
+
+      const dispatch = dispatchForDay(routeId, day);
+      const eff = computeRouteEfficiency(
+        efficiencyStops,
+        (dispatch?.dispatched_at as string | undefined) ?? null,
+      );
+
+      if (eff.completed_stops === 0 && !dispatch) continue;
+
+      rows.push({
+        date: day,
+        route_id: routeId,
+        route_name: route.name as string,
+        driver_id: (route.driver_id as string | null) ?? null,
+        driver_name: route.driver_id ? names.get(route.driver_id as string) ?? null : null,
+        dispatched: !!dispatch,
+        total_stops: efficiencyStops.length,
+        ...eff,
+      });
+    }
+
+    rows.sort((a, b) => b.date.localeCompare(a.date) || a.route_name.localeCompare(b.route_name));
+    return rows;
   });
