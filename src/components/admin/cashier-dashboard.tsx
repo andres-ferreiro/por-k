@@ -4,47 +4,12 @@ import { Link } from "@tanstack/react-router";
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period";
 import { useBranchScope } from "@/lib/branch-scope";
 import { PeriodPicker } from "@/components/admin/period-picker";
-import { DeltaBadge } from "@/components/admin/delta-badge";
+import { StatCardSimple } from "@/components/admin/stat-cards";
 import { PageHeader } from "@/components/admin/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardSummary, listPaymentsAdmin } from "@/lib/api/admin.functions";
+import { getDashboardSummary, getDashboardTrend, listPaymentsAdmin } from "@/lib/api/admin.functions";
+import { trendLabels, trendSeries } from "@/lib/dashboard-trend";
 import { fmtMoney, fmtQty } from "@/lib/format";
-import { cn } from "@/lib/utils";
-
-// ─── local KPI card ───────────────────────────────────────────────────────────
-
-function StatKpiCard({
-  label,
-  value,
-  prevValue,
-  mode = "qty",
-  sub,
-  highlight,
-  inverted,
-  displayValue,
-}: {
-  label: string;
-  value: number;
-  prevValue?: number;
-  mode?: "qty" | "money";
-  sub?: string;
-  highlight?: boolean;
-  inverted?: boolean;
-  displayValue?: string;
-}) {
-  return (
-    <div className={cn("stat-card stat-card-simple", highlight && "stat-card-highlight")}>
-      <div className="stat-card-label">{label}</div>
-      <span className="stat-card-value">
-        {displayValue ?? (mode === "money" ? fmtMoney(value) : fmtQty(value))}
-      </span>
-      {sub && <div className="stat-card-sub">{sub}</div>}
-      {prevValue !== undefined && (
-        <DeltaBadge current={value} previous={prevValue} inverted={inverted} />
-      )}
-    </div>
-  );
-}
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -66,6 +31,7 @@ export function CashierDashboard() {
 
   // ── server functions ────────────────────────────────────────────────────
   const summaryFn = useServerFn(getDashboardSummary);
+  const trendFn = useServerFn(getDashboardTrend);
   const paymentsFn = useServerFn(listPaymentsAdmin);
 
   // ── queries ─────────────────────────────────────────────────────────────
@@ -88,6 +54,18 @@ export function CashierDashboard() {
         data: {
           date_from: previousRange.from,
           date_to: previousRange.to,
+          branch_id: branchId,
+        },
+      }),
+  });
+
+  const { data: trend } = useQuery({
+    queryKey: ["dashboard", "trend", currentRange, branchId],
+    queryFn: () =>
+      trendFn({
+        data: {
+          date_from: currentRange.from,
+          date_to: currentRange.to,
           branch_id: branchId,
         },
       }),
@@ -122,6 +100,8 @@ export function CashierDashboard() {
   }));
 
   const pendingRows = (pendingPays ?? []).slice(0, 10);
+  const trendBuckets = trend?.buckets ?? [];
+  const seriesLabels = trendLabels(trendBuckets);
 
   // ── render ───────────────────────────────────────────────────────────────
   return (
@@ -140,33 +120,43 @@ export function CashierDashboard() {
       />
 
       {/* KPI grid — 2 cols mobile / 2 tablet / 4 desktop */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatKpiCard
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+        <StatCardSimple
           label="Despachos"
           value={cur?.dispatches.count ?? 0}
-          prevValue={prev?.dispatches.count}
-          sub={`${fmtQty(cur?.dispatches.units ?? 0)} u cargadas`}
+          delta={prev ? { current: cur?.dispatches.count ?? 0, previous: prev.dispatches.count } : undefined}
+          series={trendSeries(trendBuckets, "dispatches")}
+          seriesLabels={seriesLabels}
+          chartType="bar"
         />
-        <StatKpiCard
+        <StatCardSimple
           label="Cobrado"
           value={cur?.payments.collectedTotal ?? 0}
-          prevValue={prev?.payments.collectedTotal}
           mode="money"
+          delta={prev ? { current: cur?.payments.collectedTotal ?? 0, previous: prev.payments.collectedTotal } : undefined}
+          series={trendSeries(trendBuckets, "collected")}
+          seriesLabels={seriesLabels}
         />
-        <StatKpiCard
-          label="Pendiente / Crédito"
+        <StatCardSimple
+          label="Crédito + Pendiente"
           value={curPending}
-          prevValue={prevPending}
           mode="money"
+          sub={cur
+            ? `${fmtMoney(cur.payments.byMethod["credit"] ?? 0)} cred · ${fmtMoney(cur.payments.pendingAmount ?? 0)} pend`
+            : undefined}
           highlight={curPending > 0}
-          inverted
+          delta={prev ? { current: curPending, previous: prevPending, inverted: true } : undefined}
+          series={trendSeries(trendBuckets, "pendingCredit")}
+          seriesLabels={seriesLabels}
         />
-        <StatKpiCard
+        <StatCardSimple
           label="Gastos"
           value={cur?.expenses.total ?? 0}
-          prevValue={prev?.expenses.total}
           mode="money"
-          sub={`${fmtQty(cur?.expenses.count ?? 0)} registros`}
+          delta={prev ? { current: cur?.expenses.total ?? 0, previous: prev.expenses.total, inverted: true } : undefined}
+          series={trendSeries(trendBuckets, "expenses")}
+          seriesLabels={seriesLabels}
+          chartType="bar"
         />
       </div>
 
