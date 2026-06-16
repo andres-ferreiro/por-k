@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import {
   reportSalesByProduct, reportSalesByDriver, reportSalesByCustomer,
+  getRouteEfficiencyReport,
 } from "@/lib/api/admin.functions";
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
@@ -115,14 +116,18 @@ function ReportsPage() {
       />
 
       <Tabs defaultValue="products">
-        <TabsList>
-          <TabsTrigger value="products">Por producto</TabsTrigger>
-          <TabsTrigger value="drivers">Por repartidor</TabsTrigger>
-          <TabsTrigger value="customers">Por cliente</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <TabsList className="w-max min-w-full">
+            <TabsTrigger value="products">Por producto</TabsTrigger>
+            <TabsTrigger value="drivers">Por repartidor</TabsTrigger>
+            <TabsTrigger value="customers">Por cliente</TabsTrigger>
+            <TabsTrigger value="efficiency">Eficiencia rutas</TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value="products"><ByProduct filters={filters} /></TabsContent>
         <TabsContent value="drivers"><ByDriver filters={filters} /></TabsContent>
         <TabsContent value="customers"><ByCustomer filters={filters} /></TabsContent>
+        <TabsContent value="efficiency"><ByRouteEfficiency filters={filters} /></TabsContent>
       </Tabs>
     </div>
   );
@@ -284,6 +289,98 @@ function ByCustomer({ filters }: { filters: Filters }) {
                 ))}
               </TableBody>
             </Table>
+        )}
+      </div>
+    </DataTableCard>
+  );
+}
+
+function fmtEfficiency(n: number | null, suffix = "") {
+  if (n == null) return "—";
+  return `${n}${suffix}`;
+}
+
+function ByRouteEfficiency({ filters }: { filters: Filters }) {
+  const fn = useServerFn(getRouteEfficiencyReport);
+  const { data, isLoading } = useQuery({
+    queryKey: ["rep", "efficiency", filters],
+    queryFn: () => fn({ data: filters }),
+  });
+
+  return (
+    <DataTableCard>
+      <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
+        <div className="text-sm font-medium">Eficiencia de rutas</div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!data?.length}
+          onClick={() =>
+            downloadCSV(
+              `eficiencia_rutas_${filters.date_from}_${filters.date_to}.csv`,
+              (data ?? []).map((r) => ({
+                fecha: r.date,
+                ruta: r.route_name,
+                repartidor: r.driver_name ?? "",
+                paradas: r.total_stops,
+                completadas: r.completed_stops,
+                completado_pct: r.completion_pct,
+                fallidas_pct: r.failed_pct,
+                minutos_activos: r.active_minutes ?? "",
+                paradas_hora: r.stops_per_hour ?? "",
+                min_por_parada: r.avg_minutes_per_stop ?? "",
+                orden_pct: r.sequence_score ?? "",
+              })),
+            )
+          }
+        >
+          <Icon icon={Download01Icon} className="h-4 w-4 mr-1" />
+          CSV
+        </Button>
+      </div>
+      <div className="p-0 overflow-x-auto">
+        {isLoading && <p className="text-sm text-muted-foreground px-4 py-8">Cargando…</p>}
+        {!isLoading && (data?.length ?? 0) === 0 && (
+          <p className="text-sm text-muted-foreground px-4 py-8">Sin actividad en este rango.</p>
+        )}
+        {(data?.length ?? 0) > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="sticky left-0 z-10 bg-card shadow-[1px_0_0_0_hsl(var(--border))]">Fecha</TableHead>
+                <TableHead>Ruta</TableHead>
+                <TableHead>Repartidor</TableHead>
+                <TableHead className="text-right">Paradas</TableHead>
+                <TableHead className="text-right">Completado</TableHead>
+                <TableHead className="text-right">Paradas/h</TableHead>
+                <TableHead className="text-right">Min/parada</TableHead>
+                <TableHead className="text-right">Orden</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data ?? []).map((r) => (
+                <TableRow key={`${r.date}-${r.route_id}`}>
+                  <TableCell className="sticky left-0 z-10 bg-card whitespace-nowrap text-xs shadow-[1px_0_0_0_hsl(var(--border))]">{r.date}</TableCell>
+                  <TableCell>{r.route_name}</TableCell>
+                  <TableCell>{r.driver_name ?? "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">
+                    {r.completed_stops}/{r.total_stops}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">
+                    {r.completion_pct}%
+                    {r.failed_pct > 0 && (
+                      <span className="text-rose-600 ml-1">({r.failed_pct}% ✕)</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtEfficiency(r.stops_per_hour)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtEfficiency(r.avg_minutes_per_stop)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {r.sequence_score != null ? `${r.sequence_score}%` : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </div>
     </DataTableCard>

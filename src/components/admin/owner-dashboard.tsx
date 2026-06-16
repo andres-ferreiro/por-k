@@ -665,7 +665,7 @@ export function OwnerDashboard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
-                  <th className="px-4 py-2.5 text-left font-medium">Repartidor</th>
+                  <th className="sticky left-0 z-10 bg-muted/40 px-4 py-2.5 text-left font-medium shadow-[1px_0_0_0_hsl(var(--border))]">Repartidor</th>
                   <th className="px-4 py-2.5 text-right font-medium">Vendido</th>
                   <th className="px-4 py-2.5 text-right font-medium">Cobrado</th>
                   <th className="px-4 py-2.5 text-right font-medium">Pendiente</th>
@@ -685,7 +685,7 @@ export function OwnerDashboard() {
                 ) : (
                   (cur?.drivers ?? []).map((d) => (
                     <tr key={d.id} className="border-b last:border-0 hover:bg-muted/20">
-                      <td className="px-4 py-2.5">
+                      <td className="sticky left-0 z-10 bg-card px-4 py-2.5 shadow-[1px_0_0_0_hsl(var(--border))]">
                         <Link
                           to="/app/deliveries"
                           search={{ driver_id: d.id } as Record<string, string>}
