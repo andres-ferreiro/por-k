@@ -94,10 +94,11 @@ function Page() {
       <Card>
         <CardContent className="py-4 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-medium">Progreso</span>
+            <span className="font-medium text-muted-foreground">Visitados</span>
             <span>
               <span className="font-bold text-foreground tabular-nums">{done}</span>
               <span className="text-muted-foreground tabular-nums"> / {total}</span>
+              <span className="text-muted-foreground tabular-nums ml-1">({pct}%)</span>
             </span>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -206,11 +207,13 @@ function Page() {
         open={!!deliveryFor}
         onOpenChange={(o) => !o && setDeliveryFor(null)}
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
+        autoLocationOnSell={canWrite}
       />
 
       <LocationDrawer
         open={!!locationFor}
         onOpenChange={(o) => !o && setLocationFor(null)}
+        branchId={data.route.branch_id}
         customer={locationFor}
         canWrite={canWrite}
       />

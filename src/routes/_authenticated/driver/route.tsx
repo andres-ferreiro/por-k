@@ -50,7 +50,7 @@ function DriverShell() {
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-background">
+    <div className="flex h-dvh flex-col overflow-x-hidden bg-background">
       <header className="sticky top-0 z-10 shrink-0 bg-primary text-primary-foreground px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between">
         <div className="min-w-0">
           <div className="text-xs text-primary-foreground/80">Repartidor</div>
@@ -67,7 +67,7 @@ function DriverShell() {
           <div className="flex items-center justify-center py-20">
             <Icon icon={Loading03Icon} className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : waitingForDispatch ? (
+        ) : waitingForDispatch && pathname === "/driver" ? (
           <DispatchWaitingCard
             routeName={routeData?.route?.name}
             branchName={routeData?.route?.branch_name}

@@ -195,7 +195,7 @@ function Page() {
           <CardContent className="py-4">
             <div className="text-xs text-muted-foreground mb-0.5">Saldo a liquidar</div>
             <div className="text-2xl font-bold tabular-nums text-primary">{fmtMoney(saldoALiquidar)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">vendido − devuelto − gastos</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">neto vendido − gastos</div>
           </CardContent>
         </Card>
       </div>
@@ -204,13 +204,22 @@ function Page() {
       <Card>
         <CardContent className="py-4">
           <div className="flex items-center gap-4">
-            <ProgressRing value={delivered.length} max={totalRoute} size={80} />
+            <div className="flex flex-col items-center gap-1">
+              <ProgressRing value={delivered.length} max={totalRoute} size={80} />
+              <div className="text-[11px] text-muted-foreground">entregados</div>
+            </div>
             <div className="space-y-1">
               <div className="text-sm font-medium">Progreso de ruta</div>
               <div className="text-2xl font-bold tabular-nums">
                 {delivered.length}
                 <span className="text-sm font-normal text-muted-foreground"> / {totalRoute}</span>
               </div>
+              {(() => {
+                const visited = rows.filter((r) => r.status !== "pending").length;
+                return visited > delivered.length ? (
+                  <div className="text-xs text-muted-foreground">{visited} visitados en total</div>
+                ) : null;
+              })()}
               {failed.length > 0 && (
                 <div className="text-xs text-rose-600 font-medium">{failed.length} fallido{failed.length !== 1 ? "s" : ""}</div>
               )}
