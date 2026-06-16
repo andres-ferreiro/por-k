@@ -50,50 +50,52 @@ function DriverShell() {
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-x-hidden bg-background">
-      <header className="sticky top-0 z-10 shrink-0 bg-primary text-primary-foreground px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between">
-        <div className="min-w-0">
-          <div className="text-xs text-primary-foreground/80">Repartidor</div>
-          <div className="font-semibold text-lg leading-tight truncate">{ctx.fullName ?? ctx.email}</div>
-          {ctx.branchName && <div className="text-xs text-primary-foreground/80 truncate">{ctx.branchName}</div>}
-        </div>
-        <Button variant="ghost" size="icon" onClick={signOut} className="shrink-0 text-primary-foreground hover:bg-white/10">
-          <Icon icon={Logout01Icon} className="h-5 w-5" />
-        </Button>
-      </header>
-
-      <main className="flex-1 overflow-y-auto overscroll-y-contain px-4 py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
-        {routeLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <Icon icon={Loading03Icon} className="h-6 w-6 animate-spin text-muted-foreground" />
+    <div className="sm:flex sm:min-h-dvh sm:items-start sm:justify-center sm:bg-muted/30">
+      <div className="flex h-dvh flex-col overflow-x-hidden bg-background sm:w-full sm:max-w-md sm:shadow-2xl sm:border-x sm:border-border">
+        <header className="sticky top-0 z-10 shrink-0 bg-primary text-primary-foreground px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between">
+          <div className="min-w-0">
+            <div className="text-xs text-primary-foreground/80">Repartidor</div>
+            <div className="font-semibold text-lg leading-tight truncate">{ctx.fullName ?? ctx.email}</div>
+            {ctx.branchName && <div className="text-xs text-primary-foreground/80 truncate">{ctx.branchName}</div>}
           </div>
-        ) : waitingForDispatch && pathname === "/driver" ? (
-          <DispatchWaitingCard
-            routeName={routeData?.route?.name}
-            branchName={routeData?.route?.branch_name}
-          />
-        ) : (
-          <Outlet />
-        )}
-      </main>
+          <Button variant="ghost" size="icon" onClick={signOut} className="shrink-0 text-primary-foreground hover:bg-white/10">
+            <Icon icon={Logout01Icon} className="h-5 w-5" />
+          </Button>
+        </header>
 
-      <nav className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-3 border-t bg-background pb-[env(safe-area-inset-bottom,0px)]">
-        {TABS.map((t) => {
-          const active = t.exact ? pathname === t.to : pathname.startsWith(t.to);
-          return (
-            <Link
-              key={t.to}
-              to={t.to}
-              className={`flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] transition-colors ${
-                active ? "text-primary font-medium" : "text-muted-foreground"
-              }`}
-            >
-              <Icon icon={t.icon} className="h-5 w-5" />
-              {t.label}
-            </Link>
-          );
-        })}
-      </nav>
+        <main className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-5">
+          {routeLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Icon icon={Loading03Icon} className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : waitingForDispatch && pathname === "/driver" ? (
+            <DispatchWaitingCard
+              routeName={routeData?.route?.name}
+              branchName={routeData?.route?.branch_name}
+            />
+          ) : (
+            <Outlet />
+          )}
+        </main>
+
+        <nav className="shrink-0 grid grid-cols-3 border-t bg-background pb-[env(safe-area-inset-bottom,0px)]">
+          {TABS.map((t) => {
+            const active = t.exact ? pathname === t.to : pathname.startsWith(t.to);
+            return (
+              <Link
+                key={t.to}
+                to={t.to}
+                className={`flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] transition-colors ${
+                  active ? "text-primary font-medium" : "text-muted-foreground"
+                }`}
+              >
+                <Icon icon={t.icon} className="h-5 w-5" />
+                {t.label}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
     </div>
   );
 }
