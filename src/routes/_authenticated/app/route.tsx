@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
-  SidebarHeader,
+  SidebarInset,
 } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -26,10 +27,13 @@ import {
   BarChartIcon,
   Logout01Icon,
   ArrowDown01Icon,
+  SentIcon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { BranchScopeProvider } from "@/lib/branch-scope";
+import { DevDemoPanel } from "@/components/admin/dev-demo-panel";
 import { BranchSwitcher } from "@/components/admin/branch-switcher";
+import { BrandLogo } from "@/components/brand-logo";
 
 export const Route = createFileRoute("/_authenticated/app")({
   loader: async ({ context }) => {
@@ -69,6 +73,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Operación",
     items: [
+      { to: "/app/live", label: "En vivo", icon: SentIcon, roles: ["owner", "supervisor"] },
       { to: "/app/customers", label: "Clientes", icon: ContactIcon, roles: ["owner", "supervisor"] },
       { to: "/app/routes", label: "Rutas", icon: Route01Icon, roles: ["owner", "supervisor"] },
       { to: "/app/dispatch", label: "Despacho", icon: DeliveryTruck01Icon, roles: ["owner", "supervisor", "cashier"] },
@@ -113,7 +118,7 @@ function UserMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-2 py-1.5 outline-none hover:bg-muted/60 transition-colors">
+      <DropdownMenuTrigger className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 outline-none transition-colors hover:bg-muted/60">
         <Avatar className="h-8 w-8">
           <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
             {userInitials(ctx.fullName, ctx.email)}
@@ -153,17 +158,11 @@ function AdminShell() {
   return (
     <BranchScopeProvider>
     <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background">
         <Sidebar collapsible="icon">
-          <SidebarHeader className="px-4 py-5 group-data-[collapsible=icon]:px-0">
-            <div className="flex items-center gap-2.5 group-data-[collapsible=icon]:justify-center">
-              <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-sm font-semibold shrink-0">P</div>
-              <div className="group-data-[collapsible=icon]:hidden">
-                <div className="font-semibold text-foreground text-sm">Panadería Ops</div>
-              </div>
-            </div>
-          </SidebarHeader>
           <SidebarContent className="px-2 group-data-[collapsible=icon]:px-0">
+            <div className="flex justify-center px-2 py-6 group-data-[collapsible=icon]:py-4">
+              <BrandLogo size="sidebar" />
+            </div>
             {NAV.map((group) => {
               const visible = group.items.filter((i) =>
                 ctx.roles.some((r: AppRole) => i.roles.includes(r)),
@@ -199,18 +198,20 @@ function AdminShell() {
           </SidebarContent>
         </Sidebar>
 
-        <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-14 flex items-center gap-3 border-b border-border/60 bg-white px-4 shrink-0">
-            <SidebarTrigger className="text-muted-foreground" />
-            <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
-            <div className="flex-1" />
+        <SidebarInset className="h-svh overflow-hidden">
+          <header className="z-20 flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-4">
+            <SidebarTrigger className="-ml-1 text-muted-foreground" />
+            <Separator orientation="vertical" className="mr-1 h-4" />
+            <div className="min-w-0 flex-1">
+              <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
+            </div>
             <UserMenu ctx={ctx} onSignOut={handleSignOut} />
           </header>
-          <main className="flex-1 p-6 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-auto p-6">
             <Outlet />
-          </main>
-        </div>
-      </div>
+          </div>
+          {ctx.roles.includes("owner") && <DevDemoPanel />}
+        </SidebarInset>
     </SidebarProvider>
     </BranchScopeProvider>
   );

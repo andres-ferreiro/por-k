@@ -24,6 +24,7 @@ import { Route as AuthenticatedAppRoutesRouteImport } from './routes/_authentica
 import { Route as AuthenticatedAppReportsRouteImport } from './routes/_authenticated/app/reports'
 import { Route as AuthenticatedAppProductsRouteImport } from './routes/_authenticated/app/products'
 import { Route as AuthenticatedAppPaymentsRouteImport } from './routes/_authenticated/app/payments'
+import { Route as AuthenticatedAppLiveRouteImport } from './routes/_authenticated/app/live'
 import { Route as AuthenticatedAppExpensesRouteImport } from './routes/_authenticated/app/expenses'
 import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenticated/app/dispatch'
 import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
@@ -112,6 +113,11 @@ const AuthenticatedAppPaymentsRoute =
     path: '/payments',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
+const AuthenticatedAppLiveRoute = AuthenticatedAppLiveRouteImport.update({
+  id: '/live',
+  path: '/live',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
 const AuthenticatedAppExpensesRoute =
   AuthenticatedAppExpensesRouteImport.update({
     id: '/expenses',
@@ -166,6 +172,7 @@ export interface FileRoutesByFullPath {
   '/app/deliveries': typeof AuthenticatedAppDeliveriesRoute
   '/app/dispatch': typeof AuthenticatedAppDispatchRoute
   '/app/expenses': typeof AuthenticatedAppExpensesRoute
+  '/app/live': typeof AuthenticatedAppLiveRoute
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
@@ -187,6 +194,7 @@ export interface FileRoutesByTo {
   '/app/deliveries': typeof AuthenticatedAppDeliveriesRoute
   '/app/dispatch': typeof AuthenticatedAppDispatchRoute
   '/app/expenses': typeof AuthenticatedAppExpensesRoute
+  '/app/live': typeof AuthenticatedAppLiveRoute
   '/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/app/products': typeof AuthenticatedAppProductsRoute
   '/app/reports': typeof AuthenticatedAppReportsRoute
@@ -211,6 +219,7 @@ export interface FileRoutesById {
   '/_authenticated/app/deliveries': typeof AuthenticatedAppDeliveriesRoute
   '/_authenticated/app/dispatch': typeof AuthenticatedAppDispatchRoute
   '/_authenticated/app/expenses': typeof AuthenticatedAppExpensesRoute
+  '/_authenticated/app/live': typeof AuthenticatedAppLiveRoute
   '/_authenticated/app/payments': typeof AuthenticatedAppPaymentsRoute
   '/_authenticated/app/products': typeof AuthenticatedAppProductsRoute
   '/_authenticated/app/reports': typeof AuthenticatedAppReportsRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
     | '/app/deliveries'
     | '/app/dispatch'
     | '/app/expenses'
+    | '/app/live'
     | '/app/payments'
     | '/app/products'
     | '/app/reports'
@@ -257,6 +267,7 @@ export interface FileRouteTypes {
     | '/app/deliveries'
     | '/app/dispatch'
     | '/app/expenses'
+    | '/app/live'
     | '/app/payments'
     | '/app/products'
     | '/app/reports'
@@ -280,6 +291,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/deliveries'
     | '/_authenticated/app/dispatch'
     | '/_authenticated/app/expenses'
+    | '/_authenticated/app/live'
     | '/_authenticated/app/payments'
     | '/_authenticated/app/products'
     | '/_authenticated/app/reports'
@@ -406,6 +418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppPaymentsRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
+    '/_authenticated/app/live': {
+      id: '/_authenticated/app/live'
+      path: '/live'
+      fullPath: '/app/live'
+      preLoaderRoute: typeof AuthenticatedAppLiveRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
     '/_authenticated/app/expenses': {
       id: '/_authenticated/app/expenses'
       path: '/expenses'
@@ -480,6 +499,7 @@ interface AuthenticatedAppRouteRouteChildren {
   AuthenticatedAppDeliveriesRoute: typeof AuthenticatedAppDeliveriesRoute
   AuthenticatedAppDispatchRoute: typeof AuthenticatedAppDispatchRoute
   AuthenticatedAppExpensesRoute: typeof AuthenticatedAppExpensesRoute
+  AuthenticatedAppLiveRoute: typeof AuthenticatedAppLiveRoute
   AuthenticatedAppPaymentsRoute: typeof AuthenticatedAppPaymentsRoute
   AuthenticatedAppProductsRoute: typeof AuthenticatedAppProductsRoute
   AuthenticatedAppReportsRoute: typeof AuthenticatedAppReportsRoute
@@ -494,6 +514,7 @@ const AuthenticatedAppRouteRouteChildren: AuthenticatedAppRouteRouteChildren = {
   AuthenticatedAppDeliveriesRoute: AuthenticatedAppDeliveriesRoute,
   AuthenticatedAppDispatchRoute: AuthenticatedAppDispatchRoute,
   AuthenticatedAppExpensesRoute: AuthenticatedAppExpensesRoute,
+  AuthenticatedAppLiveRoute: AuthenticatedAppLiveRoute,
   AuthenticatedAppPaymentsRoute: AuthenticatedAppPaymentsRoute,
   AuthenticatedAppProductsRoute: AuthenticatedAppProductsRoute,
   AuthenticatedAppReportsRoute: AuthenticatedAppReportsRoute,

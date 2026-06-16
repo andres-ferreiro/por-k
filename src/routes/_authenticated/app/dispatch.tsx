@@ -297,6 +297,7 @@ function LocationGateSettings({ role }: { role: string | undefined }) {
     onSuccess: (result) => {
       qc.setQueryData(["branch-location-gate", branchId], result);
       qc.invalidateQueries({ queryKey: ["driver", "myRouteToday"] });
+      qc.invalidateQueries({ queryKey: ["admin", "live"] });
       toast.success(
         result.driver_location_enabled
           ? "Los repartidores pueden registrar ubicación de clientes."
@@ -312,13 +313,13 @@ function LocationGateSettings({ role }: { role: string | undefined }) {
   return (
     <div className="rounded-lg border bg-muted/30 px-4 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="space-y-0.5 min-w-0">
-        <div className="font-medium text-sm">Permitir registro de ubicación a repartidores</div>
+        <div className="font-medium text-sm">Ubicación GPS al vender</div>
         <p className="text-xs text-muted-foreground max-w-xl">
           {isLoading
             ? "Cargando configuración…"
             : data?.driver_location_enabled
-              ? `Activo en ${data.branch_name}: los repartidores pueden registrar y actualizar coordenadas GPS de los clientes.`
-              : `Desactivado en ${data?.branch_name}: los repartidores solo pueden ver ubicaciones guardadas, no editarlas.`}
+              ? `Activo en ${data.branch_name}: al vender se guarda la ubicación GPS del repartidor en el cliente.`
+              : `Desactivado en ${data?.branch_name}: el mapa muestra ubicaciones guardadas; no se actualizan al vender.`}
         </p>
         {isError && (
           <p className="text-xs text-destructive">{(error as Error)?.message ?? "Error al cargar."}</p>

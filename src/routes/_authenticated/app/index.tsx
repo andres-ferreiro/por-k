@@ -22,7 +22,7 @@ function Dashboard() {
 
   const role = ctx.primaryRole;
 
-  if (role === "owner") return <OwnerDashboard roles={ctx.roles} ownBranchName={ctx.branchName} />;
+  if (role === "owner") return <OwnerDashboard />;
   if (role === "supervisor") return <SupervisorDashboard />;
   return <CashierDashboard />;
 }

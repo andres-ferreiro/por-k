@@ -46,11 +46,11 @@ export function ExpenseSheet({ open, onOpenChange }: Props) {
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[92vh]">
+      <DrawerContent>
         <DrawerHeader>
           <DrawerTitle>Registrar gasto</DrawerTitle>
         </DrawerHeader>
-        <div className="p-4 space-y-4 overflow-y-auto">
+        <div className="max-h-[65dvh] overflow-y-auto overscroll-y-contain p-4 space-y-4">
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Monto</label>
             <Input
@@ -62,7 +62,6 @@ export function ExpenseSheet({ open, onOpenChange }: Props) {
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
               className="h-14 text-2xl font-semibold text-center tabular-nums"
-              autoFocus
             />
           </div>
           <div className="space-y-1.5">
@@ -79,7 +78,7 @@ export function ExpenseSheet({ open, onOpenChange }: Props) {
             <PhotoCapture bucket="expense-photos" value={photoPath} onChange={setPhotoPath} />
           </div>
         </div>
-        <div className="p-4 border-t flex gap-2">
+        <div className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] flex gap-2">
           <Button variant="outline" className="flex-1 h-12" onClick={() => onOpenChange(false)} disabled={mut.isPending}>
             Cancelar
           </Button>

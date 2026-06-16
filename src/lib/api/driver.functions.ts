@@ -113,7 +113,7 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
 
     const { data: rc, error: rcErr } = await supabase
       .from("route_customers")
-      .select("position, customer_id, customers(id, name, phone, address, lat, lng)")
+      .select("position, customer_id, customers(id, name, phone, address, lat, lng, photo_url)")
       .eq("route_id", route.id)
       .order("position", { ascending: true });
     if (rcErr) throw new Error(rcErr.message);
@@ -143,6 +143,7 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
         address: (c.address as string | null) ?? null,
         lat: c.lat as number | null,
         lng: c.lng as number | null,
+        photo_url: (c.photo_url as string | null) ?? null,
         delivery: d
           ? {
               id: d.id as string,
@@ -313,6 +314,13 @@ const saveDeliveryVisitSchema = z.object({
     method: z.enum(["cash", "transfer", "credit", "other"]),
     status: z.enum(["paid", "pending"]),
   }),
+  location: z
+    .object({
+      lat: z.number(),
+      lng: z.number(),
+      address: z.string().max(255).nullable().optional(),
+    })
+    .optional(),
 });
 
 export const saveDeliveryVisit = createServerFn({ method: "POST" })
@@ -438,6 +446,21 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       }
     } else if (existingPay) {
       await supabase.from("payments").delete().eq("id", existingPay.id);
+    }
+
+    if (data.location) {
+      const locationEnabled = await branchDriverLocationEnabled(supabase, route.branch_id as string);
+      if (locationEnabled) {
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        await supabaseAdmin
+          .from("customers")
+          .update({
+            lat: data.location.lat,
+            lng: data.location.lng,
+            ...(data.location.address != null ? { address: data.location.address } : {}),
+          } as any)
+          .eq("id", data.customer_id);
+      }
     }
 
     return { ok: true, delivery_id: deliveryId, total };
@@ -726,6 +749,7 @@ export const updateCustomerLocation = createServerFn({ method: "POST" })
       lat: z.number(),
       lng: z.number(),
       address: z.string().max(255).optional().nullable(),
+      photo_path: z.string().max(500).nullable().optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -763,6 +787,7 @@ export const updateCustomerLocation = createServerFn({ method: "POST" })
         lat: data.lat,
         lng: data.lng,
         ...(data.address != null ? { address: data.address } : {}),
+        ...(data.photo_path !== undefined ? { photo_url: data.photo_path } : {}),
       } as any)
       .eq("id", data.customer_id);
     if (error) throw new Error(error.message);

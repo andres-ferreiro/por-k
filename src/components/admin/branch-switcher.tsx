@@ -30,9 +30,9 @@ export function BranchSwitcher({
 
   if (!isOwner) {
     return (
-      <div className="flex items-center gap-2 text-sm text-foreground">
-        <Icon icon={Building03Icon} className="h-4 w-4 text-primary" />
-        <span className="font-medium">{ownBranchName ?? "Sin sucursal"}</span>
+      <div className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+        <Icon icon={Building03Icon} className="h-4 w-4 shrink-0 text-primary" />
+        <span className="truncate font-medium">{ownBranchName ?? "Sin sucursal"}</span>
       </div>
     );
   }
@@ -40,13 +40,13 @@ export function BranchSwitcher({
   const value = branchId ?? ALL;
 
   return (
-    <div className="flex items-center gap-2">
-      <Icon icon={Building03Icon} className="h-4 w-4 text-primary shrink-0" />
+    <div className="flex min-w-0 max-w-full items-center gap-2">
+      <Icon icon={Building03Icon} className="h-4 w-4 shrink-0 text-primary" />
       <Select
         value={value}
         onValueChange={(v) => setBranchId(v === ALL ? null : v)}
       >
-        <SelectTrigger className="h-8 w-auto min-w-[160px] max-w-[220px] text-sm border-0 bg-transparent shadow-none px-2 font-medium focus-visible:ring-0 focus-visible:border-0">
+        <SelectTrigger className="h-8 w-full min-w-0 max-w-[220px] border-0 bg-transparent px-2 text-sm font-medium shadow-none focus-visible:border-0 focus-visible:ring-0">
           <SelectValue placeholder="Todas las sucursales" />
         </SelectTrigger>
         <SelectContent>

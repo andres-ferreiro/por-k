@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { bootstrapStatus, bootstrapOwner } from "@/lib/api/bootstrap.functions";
+import { BrandLogo } from "@/components/brand-logo";
+import { APP_NAME } from "@/lib/brand";
 import { toast } from "sonner";
 
 
@@ -30,8 +32,8 @@ function AuthPage() {
     <div className="min-h-screen flex items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 h-12 w-12 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold">P</div>
-          <CardTitle>Panadería Ops</CardTitle>
+          <BrandLogo size="lg" className="mx-auto mb-3" />
+          <CardTitle className="sr-only">{APP_NAME}</CardTitle>
           <CardDescription>
             {bs?.needsBootstrap ? "Crea la cuenta del propietario para empezar" : "Inicia sesión con tu cuenta"}
           </CardDescription>

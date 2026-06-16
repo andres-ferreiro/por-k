@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period";
 import { useBranchScope } from "@/lib/branch-scope";
 import { PeriodPicker } from "@/components/admin/period-picker";
-import { DeltaBadge } from "@/components/admin/delta-badge";
+import { StatCardArea, StatCardSimple } from "@/components/admin/stat-cards";
 import { PageHeader } from "@/components/admin/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
@@ -18,58 +18,29 @@ import {
 } from "recharts";
 import {
   getDashboardSummary,
-  getDailyTotals,
+  getDashboardTrend,
   reportSalesByDriver,
 } from "@/lib/api/admin.functions";
-import { fmtMoney, fmtQty } from "@/lib/format";
+import { trendLabels, trendSeries } from "@/lib/dashboard-trend";
+import { fmtMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-// ─── local KPI card (no chart, with delta badge) ─────────────────────────────
+// ─── chart constants ──────────────────────────────────────────────────────────
 
-function StatKpiCard({
-  label,
-  value,
-  prevValue,
-  mode = "qty",
-  sub,
-  highlight,
-  inverted,
-  displayValue,
-}: {
-  label: string;
-  value: number;
-  prevValue?: number;
-  mode?: "qty" | "money";
-  sub?: string;
-  highlight?: boolean;
-  inverted?: boolean;
-  displayValue?: string;
-}) {
-  return (
-    <div className={cn("stat-card stat-card-simple", highlight && "stat-card-highlight")}>
-      <div className="stat-card-label">{label}</div>
-      <span className="stat-card-value">
-        {displayValue ?? (mode === "money" ? fmtMoney(value) : fmtQty(value))}
-      </span>
-      {sub && <div className="stat-card-sub">{sub}</div>}
-      {prevValue !== undefined && (
-        <DeltaBadge current={value} previous={prevValue} inverted={inverted} />
-      )}
-    </div>
-  );
-}
-
-// ─── chart configs ────────────────────────────────────────────────────────────
+const C1 = "#00636f";
+const C2 = "#3b82f6";
+const C3 = "#f59e0b";
+const C4 = "#6b7280";
 
 const deliveryOutcomesConfig: ChartConfig = {
-  Entregado: { label: "Entregado", color: "hsl(var(--chart-1))" },
-  Fallido: { label: "Fallido", color: "hsl(var(--chart-3))" },
-  Pendiente: { label: "Pendiente", color: "hsl(var(--chart-4))" },
+  Entregado: { label: "Entregado", color: C1 },
+  Fallido: { label: "Fallido", color: C3 },
+  Pendiente: { label: "Pendiente", color: C4 },
 };
 
 const driverComparisonConfig: ChartConfig = {
-  Vendido: { label: "Vendido", color: "hsl(var(--chart-1))" },
-  Cobrado: { label: "Cobrado", color: "hsl(var(--chart-2))" },
+  Vendido: { label: "Vendido", color: C1 },
+  Cobrado: { label: "Cobrado", color: C2 },
 };
 
 const moneyFmt = (v: unknown) => [fmtMoney(Number(v)), ""] as [string, string];
@@ -89,7 +60,7 @@ export function SupervisorDashboard() {
 
   // ── server functions ──────────────────────────────────────────────────────
   const summaryFn = useServerFn(getDashboardSummary);
-  const dailyFn = useServerFn(getDailyTotals);
+  const trendFn = useServerFn(getDashboardTrend);
   const byDriverFn = useServerFn(reportSalesByDriver);
 
   // ── queries (all parallel) ────────────────────────────────────────────────
@@ -117,10 +88,10 @@ export function SupervisorDashboard() {
       }),
   });
 
-  const { data: dailyCur } = useQuery({
-    queryKey: ["dashboard", "daily", "cur", currentRange, branchId],
+  const { data: trend } = useQuery({
+    queryKey: ["dashboard", "trend", currentRange, branchId],
     queryFn: () =>
-      dailyFn({
+      trendFn({
         data: {
           date_from: currentRange.from,
           date_to: currentRange.to,
@@ -142,8 +113,11 @@ export function SupervisorDashboard() {
   });
 
   // ── chart data ───────────────────────────────────────────────────────────
-  const outcomeData = (dailyCur ?? []).map((d) => ({
-    label: d.date.slice(5),
+  const trendBuckets = trend?.buckets ?? [];
+  const seriesLabels = trendLabels(trendBuckets);
+
+  const outcomeData = trendBuckets.map((d) => ({
+    label: d.label,
     Entregado: d.delivered,
     Fallido: d.failed,
     Pendiente: d.pending,
@@ -179,40 +153,38 @@ export function SupervisorDashboard() {
         }
       />
 
-      {/* KPI grid — 2 cols mobile, 3 tablet, 5 desktop */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatKpiCard
+      {/* KPI grid — sparklines for money, simple for counts */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+        <StatCardArea
+          label="Ventas"
+          value={soldAmount}
+          mode="money"
+          series={trendSeries(trendBuckets, "sold")}
+          seriesLabels={seriesLabels}
+        />
+        <StatCardArea
+          label="Cobrado"
+          value={collectedTotal}
+          mode="money"
+          series={trendSeries(trendBuckets, "collected")}
+          seriesLabels={seriesLabels}
+        />
+        <StatCardSimple
           label="Entregas"
           value={delivered}
           displayValue={`${delivered}/${total}`}
-          prevValue={prev?.deliveries.delivered}
-          sub={`${pending} pendientes`}
+          delta={prev ? { current: delivered, previous: prev.deliveries.delivered } : undefined}
+          series={trendSeries(trendBuckets, "delivered")}
+          seriesLabels={seriesLabels}
         />
-        <StatKpiCard
+        <StatCardSimple
           label="Fallidas"
           value={failed}
-          prevValue={prev?.deliveries.failed}
           highlight={failed > 0}
-          inverted
-        />
-        <StatKpiCard
-          label="Pendientes"
-          value={pending}
-          prevValue={prev?.deliveries.pending}
-          highlight={pending > 0}
-          inverted
-        />
-        <StatKpiCard
-          label="Ventas"
-          value={soldAmount}
-          prevValue={prev?.deliveries.soldAmount}
-          mode="money"
-        />
-        <StatKpiCard
-          label="Cobrado"
-          value={collectedTotal}
-          prevValue={prev?.payments.collectedTotal}
-          mode="money"
+          delta={prev ? { current: failed, previous: prev.deliveries.failed, inverted: true } : undefined}
+          series={trendSeries(trendBuckets, "failed")}
+          seriesLabels={seriesLabels}
+          chartType="bar"
         />
       </div>
 
@@ -231,9 +203,9 @@ export function SupervisorDashboard() {
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <ChartTooltip />
                 <Legend iconType="circle" iconSize={10} />
-                <Bar dataKey="Entregado" stackId="a" fill="hsl(var(--chart-1))" />
-                <Bar dataKey="Fallido" stackId="a" fill="hsl(var(--chart-3))" />
-                <Bar dataKey="Pendiente" stackId="a" fill="hsl(var(--chart-4))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Entregado" stackId="a" fill={C1} />
+                <Bar dataKey="Fallido" stackId="a" fill={C3} />
+                <Bar dataKey="Pendiente" stackId="a" fill={C4} radius={[3, 3, 0, 0]} />
               </BarChart>
             </ChartContainer>
           </CardContent>
@@ -256,8 +228,8 @@ export function SupervisorDashboard() {
                 <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} />
                 <ChartTooltip formatter={moneyFmt} />
                 <Legend iconType="circle" iconSize={10} />
-                <Bar dataKey="Vendido" fill="hsl(var(--chart-1))" radius={[0, 3, 3, 0]} name="Vendido" />
-                <Bar dataKey="Cobrado" fill="hsl(var(--chart-2))" radius={[0, 3, 3, 0]} name="Cobrado" />
+                <Bar dataKey="Vendido" fill={C1} radius={[0, 3, 3, 0]} name="Vendido" />
+                <Bar dataKey="Cobrado" fill={C2} radius={[0, 3, 3, 0]} name="Cobrado" />
               </BarChart>
             </ChartContainer>
           </CardContent>

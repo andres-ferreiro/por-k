@@ -5,12 +5,30 @@ import { cn } from "@/lib/utils";
 import { MODAL_OVERLAY_CLASSES } from "@/lib/overlay-classes";
 
 const Drawer = ({
-  shouldScaleBackground = true,
+  shouldScaleBackground = false,
+  handleOnly = true,
+  scrollLockTimeout = 800,
+  closeThreshold = 0.5,
+  repositionInputs = false,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
-  <DrawerPrimitive.Root shouldScaleBackground={shouldScaleBackground} {...props} />
+  <DrawerPrimitive.Root
+    shouldScaleBackground={shouldScaleBackground}
+    handleOnly={handleOnly}
+    scrollLockTimeout={scrollLockTimeout}
+    closeThreshold={closeThreshold}
+    repositionInputs={repositionInputs}
+    {...props}
+  />
 );
 Drawer.displayName = "Drawer";
+
+const DrawerNested = ({
+  ...props
+}: React.ComponentProps<typeof DrawerPrimitive.NestedRoot>) => (
+  <DrawerPrimitive.NestedRoot {...props} />
+);
+DrawerNested.displayName = "DrawerNested";
 
 const DrawerTrigger = DrawerPrimitive.Trigger;
 
@@ -39,12 +57,14 @@ const DrawerContent = React.forwardRef<
     <DrawerPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto flex-col rounded-t-[10px] border bg-background",
+        "fixed inset-x-0 bottom-0 z-50 flex h-auto max-h-[96dvh] flex-col rounded-t-[10px] border bg-background outline-none",
         className,
       )}
       {...props}
     >
-      <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />
+      <DrawerPrimitive.Handle className="mx-auto mt-3 mb-1 flex w-full shrink-0 cursor-grab touch-none items-center justify-center py-2 active:cursor-grabbing">
+        <div className="h-1.5 w-[100px] rounded-full bg-muted" />
+      </DrawerPrimitive.Handle>
       {children}
     </DrawerPrimitive.Content>
   </DrawerPortal>
@@ -87,6 +107,7 @@ DrawerDescription.displayName = DrawerPrimitive.Description.displayName;
 
 export {
   Drawer,
+  DrawerNested,
   DrawerPortal,
   DrawerOverlay,
   DrawerTrigger,

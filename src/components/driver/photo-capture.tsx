@@ -5,36 +5,65 @@ import { Button } from "@/components/ui/button";
 
 import { useServerFn } from "@tanstack/react-start";
 import { getPhotoUploadUrl } from "@/lib/api/driver.functions";
+import { getCustomerPhotoUploadUrl } from "@/lib/api/customers.functions";
+import { supabase } from "@/integrations/supabase/client";
+import { compressImage } from "@/lib/compress-image";
 import { toast } from "sonner";
 
 interface PhotoCaptureProps {
   bucket: "delivery-photos" | "expense-photos";
-  value: string | null; // uploaded path
+  value: string | null;
   onChange: (path: string | null) => void;
+  label?: string;
+  previewUrl?: string | null;
 }
 
-export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
+interface CustomerPhotoCaptureProps {
+  bucket: "customer-photos";
+  branchId?: string | null;
+  value: string | null;
+  onChange: (path: string | null) => void;
+  label?: string;
+  previewUrl?: string | null;
+}
+
+type Props = PhotoCaptureProps | CustomerPhotoCaptureProps;
+
+export function PhotoCapture(props: Props) {
+  const { value, onChange, label, previewUrl } = props;
+  const bucket = props.bucket;
+  const branchId = props.bucket === "customer-photos" ? props.branchId : undefined;
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const getUploadUrl = useServerFn(getPhotoUploadUrl);
+  const getCustomerUploadUrl = useServerFn(getCustomerPhotoUploadUrl);
 
   async function handleFile(file: File) {
     if (file.size > 8 * 1024 * 1024) {
       toast.error("La foto es muy grande (máx 8 MB).");
       return;
     }
+    setCompressing(true);
+    let uploadFile: File;
+    try {
+      uploadFile = await compressImage(file);
+    } finally {
+      setCompressing(false);
+    }
     setUploading(true);
-    const localUrl = URL.createObjectURL(file);
+    const localUrl = URL.createObjectURL(uploadFile);
     setPreview(localUrl);
     try {
-      const { path, signedUrl } = await getUploadUrl({ data: { bucket, filename: file.name } });
-      const res = await fetch(signedUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "image/jpeg" },
-      });
-      if (!res.ok) throw new Error("Falló la carga de la foto.");
+      const { path, token } =
+        bucket === "customer-photos"
+          ? await getCustomerUploadUrl({ data: { branch_id: branchId ?? null, filename: uploadFile.name } })
+          : await getUploadUrl({ data: { bucket, filename: uploadFile.name } });
+      const { error } = await supabase.storage
+        .from(bucket)
+        .uploadToSignedUrl(path, token, uploadFile, { contentType: uploadFile.type || "image/jpeg" });
+      if (error) throw error;
       onChange(path);
     } catch (e: any) {
       toast.error(e?.message ?? "No se pudo subir la foto.");
@@ -51,9 +80,12 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
   }
 
   const hasPhoto = !!preview || !!value;
+  const displayPreview = preview ?? (value && previewUrl ? previewUrl : null);
+  const busy = compressing || uploading;
 
   return (
     <div className="space-y-2">
+      {label ? <div className="text-sm font-medium">{label}</div> : null}
       <input
         ref={fileRef}
         type="file"
@@ -65,10 +97,10 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
           if (f) handleFile(f);
         }}
       />
-      {hasPhoto && preview ? (
+      {displayPreview ? (
         <div className="relative">
           <img
-            src={preview}
+            src={displayPreview}
             alt="Evidencia"
             className="w-full rounded-md max-h-64 object-cover border"
           />
@@ -77,6 +109,7 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
             onClick={clear}
             className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
             aria-label="Quitar foto"
+            disabled={busy}
           >
             <Icon icon={Cancel01Icon} className="h-4 w-4" />
           </button>
@@ -84,7 +117,7 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
       ) : hasPhoto ? (
         <div className="text-sm text-muted-foreground flex items-center gap-2">
           Foto subida.
-          <button type="button" onClick={clear} className="underline">Quitar</button>
+          <button type="button" onClick={clear} className="underline" disabled={busy}>Quitar</button>
         </div>
       ) : null}
       <Button
@@ -92,10 +125,10 @@ export function PhotoCapture({ bucket, value, onChange }: PhotoCaptureProps) {
         variant="outline"
         className="w-full h-12"
         onClick={() => fileRef.current?.click()}
-        disabled={uploading}
+        disabled={busy}
       >
-        {uploading ? <Icon icon={Loading03Icon} className="h-4 w-4 animate-spin" /> : <Icon icon={Camera01Icon} className="h-4 w-4" />}
-        {hasPhoto ? "Cambiar foto" : "Tomar foto"}
+        {busy ? <Icon icon={Loading03Icon} className="h-4 w-4 animate-spin" /> : <Icon icon={Camera01Icon} className="h-4 w-4" />}
+        {compressing ? "Comprimiendo…" : uploading ? "Subiendo…" : hasPhoto ? "Cambiar foto" : "Tomar foto"}
       </Button>
     </div>
   );

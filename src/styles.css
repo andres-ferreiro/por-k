@@ -2,6 +2,57 @@
 @source "../src";
 @import "tw-animate-css";
 
+/* Vaul drawer animations (inlined — package doesn't export style.css) */
+[data-vaul-drawer] {
+  will-change: transform;
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-vaul-drawer][data-vaul-snap-points="false"][data-vaul-drawer-direction="bottom"][data-state="open"] {
+  animation-name: vaul-slide-from-bottom;
+}
+[data-vaul-drawer][data-vaul-snap-points="false"][data-vaul-drawer-direction="bottom"][data-state="closed"] {
+  animation-name: vaul-slide-to-bottom;
+}
+[data-vaul-overlay][data-vaul-snap-points="false"] {
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-vaul-overlay][data-vaul-snap-points="false"][data-state="open"] {
+  animation-name: vaul-fade-in;
+}
+[data-vaul-overlay][data-state="closed"] {
+  animation-name: vaul-fade-out;
+}
+@keyframes vaul-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes vaul-fade-out {
+  to { opacity: 0; }
+}
+@keyframes vaul-slide-from-bottom {
+  from { transform: translate3d(0, var(--initial-transform, 100%), 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes vaul-slide-to-bottom {
+  to { transform: translate3d(0, var(--initial-transform, 100%), 0); }
+}
+
+/* Allow scroll inside drawers; drag is limited to the handle via handleOnly */
+[data-vaul-drawer] {
+  touch-action: auto;
+}
+[data-vaul-handle] {
+  touch-action: none;
+}
+
+/* Prevent stale bottom offset from keyboard logic on content-sized drawers */
+[data-vaul-drawer][data-vaul-snap-points="false"][data-state="open"] {
+  bottom: 0 !important;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -100,6 +151,9 @@
   html, body {
     font-family: var(--font-sans);
     font-feature-settings: "cv11", "ss01";
+    overflow-x: hidden;
+    max-width: 100%;
+    overscroll-behavior-x: none;
   }
   body {
     background-color: var(--color-background);
@@ -107,6 +161,16 @@
     font-size: 14px;
     font-weight: 400;
     line-height: 1.5;
+    touch-action: pan-y;
+  }
+
+  /* Prevent iOS auto-zoom when focusing inputs */
+  @media (max-width: 639px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
   }
   h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
   h2 { font-size: 17px; font-weight: 500; letter-spacing: -0.005em; }
@@ -195,7 +259,12 @@
 }
 
 .stat-card-chart {
-  /* auto height — sparkline defines remaining space */
+  min-height: 108px;
+  overflow: visible;
+}
+
+.stat-card-chart:hover {
+  z-index: 2;
 }
 
 .stat-card-highlight {
@@ -249,6 +318,18 @@
   margin-top: 0;
 }
 
+.stat-card-header .stat-card-sub {
+  margin-top: 4px;
+}
+
+.stat-card-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .stat-badge-up {
   background: var(--stat-up-bg);
   color: var(--stat-up-text);
@@ -276,6 +357,7 @@
   height: 44px;
   margin-top: 8px;
   flex-shrink: 0;
+  overflow: visible;
 }
 
 .stat-sparkline-inner {

@@ -17,6 +17,40 @@ export function todayInTZ(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Calendar YYYY-MM-DD in APP_TZ for an instant. */
+export function dateStrInTZ(isoOrDate: string | Date): string {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  return new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ }).format(d);
+}
+
+/** Hour 0–23 in APP_TZ for an instant. */
+export function hourInTZ(isoOrDate: string | Date): number {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: APP_TZ,
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(d);
+  const h = parts.find((p) => p.type === "hour")!.value;
+  return Number(h === "24" ? "0" : h);
+}
+
+const SHORT_MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/** Short hour label for chart axes (e.g. 8a, 12p). */
+export function hourLabelShort(hour: number): string {
+  if (hour === 0) return "12a";
+  if (hour < 12) return `${hour}a`;
+  if (hour === 12) return "12p";
+  return `${hour - 12}p`;
+}
+
+/** Short month label from YYYY-MM. */
+export function monthLabelShort(monthKey: string): string {
+  const m = Number(monthKey.slice(5, 7));
+  return SHORT_MONTHS[m - 1] ?? monthKey.slice(5);
+}
+
 // Convert a wall-clock YYYY-MM-DD HH:mm:ss in APP_TZ to a UTC ISO string.
 export function tzWallToUtcISO(dateStr: string, time: string = "00:00:00"): string {
   // Compute the UTC offset (in minutes) for APP_TZ at the given local instant.

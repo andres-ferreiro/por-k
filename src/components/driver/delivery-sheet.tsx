@@ -29,6 +29,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
 
 type Status = "delivered" | "pending" | "failed";
 type Method = "cash" | "transfer" | "credit" | "other";
@@ -38,6 +39,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   customer: { id: string; name: string } | null;
+  autoLocationOnSell?: boolean;
 }
 
 const STATUSES: { value: Status; label: string; icon: typeof CheckmarkCircle02Icon; cls: string; activeCls: string }[] = [
@@ -55,7 +57,7 @@ const METHODS: { value: Method; label: string; icon: typeof BanknoteIcon }[] = [
 
 const fmt = (n: number) => n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
 
-export function DeliverySheet({ open, onOpenChange, customer }: Props) {
+export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell = false }: Props) {
   const [status, setStatus] = useState<Status>("delivered");
   const [comment, setComment] = useState("");
   const [photoPath, setPhotoPath] = useState<string | null>(null);
@@ -144,6 +146,16 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
       const returns = Object.entries(retQty)
         .filter(([, q]) => q > 0)
         .map(([product_id, quantity]) => ({ product_id, quantity }));
+
+      let location: { lat: number; lng: number; address: string | null } | undefined;
+      if (autoLocationOnSell && status === "delivered") {
+        const coords = await captureCurrentLocation();
+        if (coords) {
+          const address = await reverseGeocode(coords.lat, coords.lng);
+          location = { ...coords, address };
+        }
+      }
+
       return save({
         data: {
           customer_id: customer.id,
@@ -153,6 +165,7 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
           items: status === "delivered" ? items : [],
           returns,
           payment: { method, status: payStatus },
+          location,
         },
       });
     },
@@ -170,14 +183,15 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
   return (
     <>
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[96vh] flex flex-col">
-          <DrawerHeader className="pb-0 shrink-0">
+        <DrawerContent className="flex h-[96dvh] max-h-[96dvh] flex-col overflow-hidden">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <DrawerHeader className="shrink-0 pb-0">
             <DrawerTitle>Visita</DrawerTitle>
             <DrawerDescription>{customer.name}</DrawerDescription>
           </DrawerHeader>
 
           {/* Status — compact segmented control */}
-          <div className="px-4 pt-2 pb-0 shrink-0">
+          <div className="shrink-0 px-4 pt-2 pb-0">
             <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-muted">
               {STATUSES.map((s) => {
                 const active = status === s.value;
@@ -198,29 +212,39 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
             </div>
           </div>
 
-          {/* Main scrollable content */}
-          <div className="flex-1 overflow-y-auto px-4 pt-3 pb-2 space-y-3 min-h-0">
-            {isDelivered ? (
-              <Tabs defaultValue="sell" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-3">
-                  <TabsTrigger value="sell" className="gap-1.5">
+          {isDelivered ? (
+            <Tabs defaultValue="sell" className="flex min-h-0 flex-1 flex-col">
+              {/* Fixed sell / returns tabs */}
+              <div className="shrink-0 border-b bg-background px-4">
+                <TabsList className="grid h-auto w-full grid-cols-2 gap-0 rounded-none bg-transparent p-0">
+                  <TabsTrigger
+                    value="sell"
+                    className="gap-1.5 rounded-none border-b-2 border-transparent bg-transparent py-2.5 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
                     Vender
                     {sellCount > 0 && (
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                         {sellCount}
                       </span>
                     )}
                   </TabsTrigger>
-                  <TabsTrigger value="returns" className="gap-1.5" disabled={returnableProducts.length === 0}>
+                  <TabsTrigger
+                    value="returns"
+                    disabled={returnableProducts.length === 0}
+                    className="gap-1.5 rounded-none border-b-2 border-transparent bg-transparent py-2.5 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none disabled:opacity-40"
+                  >
                     Devoluciones
                     {retCount > 0 && (
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] text-white font-bold">
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white">
                         {retCount}
                       </span>
                     )}
                   </TabsTrigger>
                 </TabsList>
+              </div>
 
+              {/* Scrollable product list + extras */}
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pt-3 pb-2 space-y-3">
                 <TabsContent value="sell" className="mt-0 space-y-1.5">
                   {productsQ.isLoading && (
                     <p className="text-sm text-muted-foreground py-6 text-center">Cargando productos…</p>
@@ -246,7 +270,7 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
                             {q > 0 && <span className="ml-2 font-semibold text-foreground">= {fmt(subtotal)}</span>}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1">
                           <Button
                             type="button"
                             size="icon"
@@ -259,7 +283,7 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
                           </Button>
                           <button
                             type="button"
-                            className="w-10 text-center font-bold tabular-nums text-sm px-1 py-1.5 rounded-md hover:bg-accent transition-colors"
+                            className="w-10 text-center font-bold tabular-nums text-base px-1 py-1.5 rounded-md hover:bg-accent transition-colors"
                             onClick={() => setKeypadFor({ id: p.id, type: "sell", name: p.name })}
                           >
                             {q}
@@ -294,7 +318,7 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
                           <div className="font-medium text-sm truncate">{p.name}</div>
                           <div className="text-xs text-muted-foreground">{p.unit}</div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1">
                           <Button
                             type="button"
                             size="icon"
@@ -307,7 +331,7 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
                           </Button>
                           <button
                             type="button"
-                            className="w-10 text-center font-bold tabular-nums text-sm px-1 py-1.5 rounded-md hover:bg-accent transition-colors"
+                            className="w-10 text-center font-bold tabular-nums text-base px-1 py-1.5 rounded-md hover:bg-accent transition-colors"
                             onClick={() => setKeypadFor({ id: p.id, type: "return", name: p.name })}
                           >
                             {q}
@@ -326,14 +350,6 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
                     );
                   })}
                 </TabsContent>
-              </Tabs>
-            ) : (
-              <div className="py-4 text-center text-sm text-muted-foreground rounded-lg border border-dashed">
-                {status === "pending"
-                  ? "Visita marcada como pendiente. No se registrarán productos vendidos."
-                  : "Visita marcada como fallida. No se registrarán productos vendidos."}
-              </div>
-            )}
 
             {/* Payment — collapsible */}
             <div className="rounded-lg border overflow-hidden">
@@ -431,7 +447,17 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
                 </div>
               )}
             </div>
-          </div>
+              </div>
+            </Tabs>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pt-3 pb-2">
+              <div className="py-4 text-center text-sm text-muted-foreground rounded-lg border border-dashed">
+                {status === "pending"
+                  ? "Visita marcada como pendiente. No se registrarán productos vendidos."
+                  : "Visita marcada como fallida. No se registrarán productos vendidos."}
+              </div>
+            </div>
+          )}
 
           {/* Fixed bottom bar */}
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
@@ -459,23 +485,23 @@ export function DeliverySheet({ open, onOpenChange, customer }: Props) {
               </Button>
             </div>
           </div>
+
+          {keypadFor && (
+            <QuantityKeypad
+              open
+              onClose={() => setKeypadFor(null)}
+              label={keypadFor.name}
+              value={keypadFor.type === "sell" ? (qty[keypadFor.id] ?? 0) : (retQty[keypadFor.id] ?? 0)}
+              onConfirm={(val) => {
+                if (keypadFor.type === "sell") setQtyVal(keypadFor.id, val);
+                else setRetQtyVal(keypadFor.id, val);
+                setKeypadFor(null);
+              }}
+            />
+          )}
+          </div>
         </DrawerContent>
       </Drawer>
-
-      {/* Quantity keypad */}
-      {keypadFor && (
-        <QuantityKeypad
-          open={!!keypadFor}
-          onOpenChange={(o) => !o && setKeypadFor(null)}
-          label={keypadFor.name}
-          value={keypadFor.type === "sell" ? (qty[keypadFor.id] ?? 0) : (retQty[keypadFor.id] ?? 0)}
-          onConfirm={(val) => {
-            if (keypadFor.type === "sell") setQtyVal(keypadFor.id, val);
-            else setRetQtyVal(keypadFor.id, val);
-            setKeypadFor(null);
-          }}
-        />
-      )}
     </>
   );
 }
