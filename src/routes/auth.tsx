@@ -22,9 +22,6 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
-const GRAIN =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E\")";
-
 function AuthPage() {
   const status = useServerFn(bootstrapStatus);
   const { data: bs } = useQuery({ queryKey: ["bootstrap"], queryFn: () => status() });
@@ -35,66 +32,28 @@ function AuthPage() {
     : "Inicia sesión con tu cuenta";
 
   return (
-    <>
-      {/* ── Mobile layout (< md) ── */}
-      <div
-        className="md:hidden min-h-svh flex flex-col"
-        style={{ background: "linear-gradient(160deg, #1E2D47 0%, #0a4a52 100%)" }}
-      >
-        {/* Grain overlay */}
-        <div
-          className="fixed inset-0 pointer-events-none"
-          style={{ backgroundImage: GRAIN, backgroundSize: "200px 200px", opacity: 0.035 }}
-        />
-
-        {/* Brand section */}
-        <div className="relative flex-1 flex flex-col items-center justify-center px-6 pt-safe pb-6 animate-auth-brand">
-          <BrandLogo size="lg" className="mb-4 drop-shadow-lg" />
-          <h1 className="text-white text-2xl font-semibold tracking-tight">{APP_NAME}</h1>
-          <p className="mt-1 text-white/50 text-xs tracking-widest uppercase">
-            {APP_DESCRIPTION.split("—")[0].trim()}
-          </p>
+    <div className="min-h-svh flex items-center justify-center bg-muted/40 p-6 pt-safe pb-safe">
+      <div className="w-full max-w-sm">
+        {/* Logo + name */}
+        <div className="mb-6 flex flex-col items-center gap-2 animate-auth-brand">
+          <BrandLogo size="lg" />
+          <h1 className="text-lg font-semibold tracking-tight text-foreground">{APP_NAME}</h1>
         </div>
 
-        {/* Sliding form panel */}
-        <div className="relative animate-auth-panel rounded-t-[2rem] bg-white shadow-2xl">
-          <div className="px-7 pt-7 pb-4">
-            <h2 className="text-base font-semibold text-foreground">
-              {isBootstrap ? "Crear propietario" : "Bienvenido"}
+        {/* Card */}
+        <div className="rounded-2xl border border-border bg-card shadow-sm animate-auth-panel">
+          <div className="px-7 pt-7 pb-2">
+            <h2 className="text-sm font-semibold text-foreground">
+              {isBootstrap ? "Crear propietario" : "Iniciar sesión"}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
           </div>
-          <div className="px-7 pb-safe">
+          <div className="px-7 pb-7 pt-4">
             {isBootstrap ? <BootstrapForm /> : <LoginForm />}
           </div>
-          {/* Bottom notch fill */}
-          <div className="h-[env(safe-area-inset-bottom,0px)] bg-white" />
         </div>
       </div>
-
-      {/* ── Desktop layout (≥ md) ── */}
-      <div className="hidden md:flex min-h-screen items-center justify-center bg-muted/40 p-4">
-        <div className="w-full max-w-sm">
-          {/* Logo + name above card */}
-          <div className="mb-6 flex flex-col items-center gap-2 animate-auth-brand">
-            <BrandLogo size="lg" />
-            <h1 className="text-lg font-semibold tracking-tight text-foreground">{APP_NAME}</h1>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card shadow-sm animate-auth-panel">
-            <div className="px-7 pt-7 pb-2">
-              <h2 className="text-sm font-semibold text-foreground">
-                {isBootstrap ? "Crear propietario" : "Iniciar sesión"}
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
-            </div>
-            <div className="px-7 pb-7 pt-4">
-              {isBootstrap ? <BootstrapForm /> : <LoginForm />}
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
 
