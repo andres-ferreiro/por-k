@@ -1080,7 +1080,14 @@ export const getLiveOperations = createServerFn({ method: "POST" })
     }
 
     const dispatches = dispatchesRes.data ?? [];
-    const dispatchByRoute = new Map(dispatches.map((d: any) => [d.route_id as string, d]));
+    // Keep the earliest dispatch per route (used as route start time in efficiency metrics)
+    const dispatchByRoute = new Map<string, any>();
+    for (const d of dispatches) {
+      const existing = dispatchByRoute.get(d.route_id as string);
+      if (!existing || (d.dispatched_at as string) < (existing.dispatched_at as string)) {
+        dispatchByRoute.set(d.route_id as string, d);
+      }
+    }
 
     const preorderRouteIds = routes.filter((r: any) => r.route_mode === "preorder").map((r: any) => r.id);
     let ordersByRouteCustomer = new Map<string, any>();
@@ -1475,13 +1482,18 @@ export const getRouteEfficiencyReport = createServerFn({ method: "POST" })
       deliveriesByDayRoute.set(key, list);
     }
 
+    // Returns the earliest dispatch for a route on a given day (used as route start time in efficiency metrics)
     function dispatchForDay(routeId: string, day: string) {
       const { startISO: dayStart, endISO: dayEnd } = tzDayRange(day);
-      return dispatches.find(
+      const matches = dispatches.filter(
         (disp: any) =>
           disp.route_id === routeId &&
           disp.dispatched_at >= dayStart &&
           disp.dispatched_at < dayEnd,
+      );
+      if (matches.length === 0) return undefined;
+      return matches.reduce((earliest: any, d: any) =>
+        (d.dispatched_at as string) < (earliest.dispatched_at as string) ? d : earliest,
       );
     }
 

@@ -515,25 +515,28 @@ export const getMyDispatchStock = createServerFn({ method: "GET" })
     const route = (routes ?? [])[0] as any;
     if (!route) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
 
-    // Find today's dispatch for this route+driver
+    // Find ALL of today's dispatches for this route+driver (there may be multiple top-ups)
     const { startISO, endISO } = tzDayRange(today);
-    const { data: dispatch, error: dErr } = await supabase
+    const { data: dispatches, error: dErr } = await supabase
       .from("dispatches")
       .select("id, dispatch_items(product_id, quantity)")
       .eq("route_id", route.id)
       .eq("driver_id", userId)
       .gte("dispatched_at", startISO)
       .lt("dispatched_at", endISO)
-      .order("dispatched_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("dispatched_at", { ascending: false });
     if (dErr) throw new Error(dErr.message);
-    if (!dispatch) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
+    if (!dispatches || dispatches.length === 0) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
 
-    // Build loaded map
+    // Use the most recent dispatch id as the reference
+    const latestDispatchId = (dispatches[0] as any).id as string;
+
+    // Build loaded map from ALL today's dispatches (handles multiple top-ups per day)
     const loaded: Record<string, number> = {};
-    for (const item of (dispatch as any).dispatch_items ?? []) {
-      loaded[item.product_id] = (loaded[item.product_id] ?? 0) + Number(item.quantity);
+    for (const dispatch of dispatches) {
+      for (const item of (dispatch as any).dispatch_items ?? []) {
+        loaded[item.product_id] = (loaded[item.product_id] ?? 0) + Number(item.quantity);
+      }
     }
 
     // Sum already sold today
@@ -576,7 +579,7 @@ export const getMyDispatchStock = createServerFn({ method: "GET" })
     const totalUnits = Object.values(stock).reduce((a, b) => a + b, 0);
 
     return {
-      dispatch_id: (dispatch as any).id as string,
+      dispatch_id: latestDispatchId,
       stock,
       total_units: totalUnits,
     };

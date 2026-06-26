@@ -499,21 +499,35 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
     // Validate stock limits when items are being sold
     if (data.status === "delivered" && data.items.length > 0) {
       const { startISO, endISO } = tzDayRange(today);
-      const { data: dispatch, error: dispErr } = await supabase
+      // Fetch ALL of today's dispatches (handles multiple top-ups per day)
+      const { data: dispatches, error: dispErr } = await supabase
         .from("dispatches")
         .select("id, dispatch_items(product_id, quantity)")
         .eq("route_id", route.id)
         .eq("driver_id", userId)
         .gte("dispatched_at", startISO)
         .lt("dispatched_at", endISO)
-        .order("dispatched_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("dispatched_at", { ascending: false });
       if (dispErr) throw new Error(dispErr.message);
-      if (dispatch) {
+      if (dispatches && dispatches.length > 0) {
         const loaded: Record<string, number> = {};
-        for (const it of (dispatch as any).dispatch_items ?? []) {
-          loaded[it.product_id] = (loaded[it.product_id] ?? 0) + Number(it.quantity);
+        for (const dispatch of dispatches) {
+          for (const it of (dispatch as any).dispatch_items ?? []) {
+            loaded[it.product_id] = (loaded[it.product_id] ?? 0) + Number(it.quantity);
+          }
+        }
+        // Add cross-branch loads for parity with getMyDispatchStock
+        const { data: crossLoads, error: clErr } = await supabase
+          .from("cross_branch_loads")
+          .select("id, cross_branch_load_items(product_id, quantity)")
+          .eq("driver_id", userId)
+          .gte("created_at", startISO)
+          .lt("created_at", endISO);
+        if (clErr) throw new Error(clErr.message);
+        for (const cl of crossLoads ?? []) {
+          for (const it of (cl as any).cross_branch_load_items ?? []) {
+            loaded[it.product_id] = (loaded[it.product_id] ?? 0) + Number(it.quantity);
+          }
         }
         // Find existing delivery for this customer today (to exclude from sold sum on re-save)
         const { data: existingDel } = await supabase
