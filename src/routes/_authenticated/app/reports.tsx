@@ -1,6 +1,6 @@
 import { Download01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
@@ -15,9 +15,11 @@ import {
 import {
   reportSalesByProduct, reportSalesByDriver, reportSalesByCustomer,
   getRouteEfficiencyReport,
+  getReturnsReport,
 } from "@/lib/api/admin.functions";
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
+import { getMyContext } from "@/lib/api/context.functions";
 import { todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
 import { downloadCSV } from "@/lib/csv";
@@ -27,6 +29,15 @@ import {
 } from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/app/reports")({
+  loader: async ({ context }) => {
+    const ctx = await context.queryClient.fetchQuery({
+      queryKey: ["myContext"],
+      queryFn: () => getMyContext(),
+    });
+    const allowed = ctx.roles.some((r) => r === "owner" || r === "supervisor");
+    if (!allowed) throw redirect({ to: "/app" });
+    return ctx;
+  },
   component: ReportsPage,
 });
 
@@ -122,12 +133,14 @@ function ReportsPage() {
             <TabsTrigger value="drivers">Por repartidor</TabsTrigger>
             <TabsTrigger value="customers">Por cliente</TabsTrigger>
             <TabsTrigger value="efficiency">Eficiencia rutas</TabsTrigger>
+            <TabsTrigger value="returns">Devoluciones</TabsTrigger>
           </TabsList>
         </div>
         <TabsContent value="products"><ByProduct filters={filters} /></TabsContent>
         <TabsContent value="drivers"><ByDriver filters={filters} /></TabsContent>
         <TabsContent value="customers"><ByCustomer filters={filters} /></TabsContent>
         <TabsContent value="efficiency"><ByRouteEfficiency filters={filters} /></TabsContent>
+        <TabsContent value="returns"><ReturnsReport filters={filters} /></TabsContent>
       </Tabs>
     </div>
   );
@@ -384,5 +397,131 @@ function ByRouteEfficiency({ filters }: { filters: Filters }) {
         )}
       </div>
     </DataTableCard>
+  );
+}
+
+function ReturnsReport({ filters }: { filters: Filters }) {
+  const fn = useServerFn(getReturnsReport);
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "returns", filters],
+    queryFn: () => fn({ data: filters }),
+  });
+
+  const [tab, setTab] = useState<"delivery" | "truck">("delivery");
+
+  const deliveryRows = data?.delivery_returns ?? [];
+  const truckRows = data?.truck_returns ?? [];
+
+  function exportDeliveryCSV() {
+    downloadCSV(
+      deliveryRows.map((r) => ({
+        Fecha: r.date,
+        Ruta: r.route_name ?? "",
+        Repartidor: r.driver_name ?? "",
+        Cliente: r.customer_name ?? "",
+        Producto: r.product_name ?? "",
+        Unidad: r.unit ?? "",
+        Cantidad: r.quantity,
+      })),
+      "devoluciones_clientes.csv",
+    );
+  }
+
+  function exportTruckCSV() {
+    downloadCSV(
+      truckRows.map((r) => ({
+        Fecha: r.date,
+        Ruta: r.route_name ?? "",
+        Repartidor: r.driver_name ?? "",
+        Producto: r.product_name ?? "",
+        Unidad: r.unit ?? "",
+        Cantidad: r.quantity,
+      })),
+      "devoluciones_camion.csv",
+    );
+  }
+
+  return (
+    <div className="space-y-4 mt-2">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "delivery" | "truck")}>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <TabsList>
+            <TabsTrigger value="delivery">Devoluciones de clientes ({deliveryRows.length})</TabsTrigger>
+            <TabsTrigger value="truck">Devoluciones de camión ({truckRows.length})</TabsTrigger>
+          </TabsList>
+          <Button variant="outline" size="sm" className="h-9 text-sm" onClick={tab === "delivery" ? exportDeliveryCSV : exportTruckCSV} disabled={!data}>
+            CSV
+          </Button>
+        </div>
+
+        <TabsContent value="delivery">
+          <DataTableCard>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Ruta</TableHead>
+                  <TableHead>Repartidor</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Producto</TableHead>
+                  <TableHead className="text-right">Cantidad</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading && (
+                  <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">Cargando…</TableCell></TableRow>
+                )}
+                {!isLoading && deliveryRows.length === 0 && (
+                  <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">Sin devoluciones de clientes en el período.</TableCell></TableRow>
+                )}
+                {deliveryRows.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="whitespace-nowrap text-xs">{r.date}</TableCell>
+                    <TableCell>{r.route_name ?? "—"}</TableCell>
+                    <TableCell>{r.driver_name ?? "—"}</TableCell>
+                    <TableCell>{r.customer_name ?? "—"}</TableCell>
+                    <TableCell>{r.product_name ?? "—"}{r.unit ? <span className="text-xs text-muted-foreground ml-1">({r.unit})</span> : null}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtNum(r.quantity)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </DataTableCard>
+        </TabsContent>
+
+        <TabsContent value="truck">
+          <DataTableCard>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Ruta</TableHead>
+                  <TableHead>Repartidor</TableHead>
+                  <TableHead>Producto</TableHead>
+                  <TableHead className="text-right">Cantidad</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading && (
+                  <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">Cargando…</TableCell></TableRow>
+                )}
+                {!isLoading && truckRows.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">Sin devoluciones de camión en el período.</TableCell></TableRow>
+                )}
+                {truckRows.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="whitespace-nowrap text-xs">{r.date}</TableCell>
+                    <TableCell>{r.route_name ?? "—"}</TableCell>
+                    <TableCell>{r.driver_name ?? "—"}</TableCell>
+                    <TableCell>{r.product_name ?? "—"}{r.unit ? <span className="text-xs text-muted-foreground ml-1">({r.unit})</span> : null}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtNum(r.quantity)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </DataTableCard>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

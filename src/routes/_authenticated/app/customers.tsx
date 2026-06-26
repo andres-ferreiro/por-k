@@ -1,6 +1,6 @@
 import { Add01Icon, Delete02Icon, Download01Icon, Edit01Icon, MapPinIcon, Upload01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
@@ -10,7 +10,7 @@ import {
 } from "@/lib/api/customers.functions";
 import { parseCSV } from "@/lib/csv";
 import { getMyContext } from "@/lib/api/context.functions";
-import { listBranches } from "@/lib/api/branches.functions";
+import { listBranches, isBranchPreorderEnabled } from "@/lib/api/branches.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 import { toast } from "sonner";
+import { StatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { LocationPicker } from "@/components/location-picker";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
@@ -35,6 +36,15 @@ import {
 } from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/app/customers")({
+  loader: async ({ context }) => {
+    const ctx = await context.queryClient.fetchQuery({
+      queryKey: ["myContext"],
+      queryFn: () => getMyContext(),
+    });
+    const allowed = ctx.roles.some((r) => r === "owner" || r === "supervisor");
+    if (!allowed) throw redirect({ to: "/app" });
+    return ctx;
+  },
   component: CustomersPage,
 });
 
@@ -50,7 +60,15 @@ interface Customer {
   photo_url: string | null;
   notes: string | null;
   is_active: boolean;
+  pending_balance: number;
+  category?: string;
 }
+
+const CATEGORY_LABELS: Record<string, string> = {
+  retail: "Retail",
+  hotel: "Hotel",
+  restaurant: "Restaurante",
+};
 
 function extractPath(photoUrl: string | null): string | null {
   if (!photoUrl) return null;
@@ -109,7 +127,7 @@ function CustomersPage() {
     });
   }, [customers, branchId, search, locationFilter, statusFilter, sort]);
 
-  const colSpan = isOwner ? 6 : 5;
+  const colSpan = isOwner ? 7 : 6;
 
   return (
     <div className="space-y-4">
@@ -150,9 +168,11 @@ function CustomersPage() {
           <TableHeader>
             <TableRow>
               <SortableTableHead label="Nombre" sortKey="name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Categoría" sortKey="category" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <SortableTableHead label="Teléfono" sortKey="phone" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <SortableTableHead label="Dirección" sortKey="address" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <SortableTableHead label="Ubicación" sortKey="location" activeKey={sortKey} direction={sortDir} onSort={toggle} />
+              <SortableTableHead label="Saldo pend." sortKey="pending_balance" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               {isOwner && (
                 <SortableTableHead label="Sucursal" sortKey="branch_name" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               )}
@@ -167,11 +187,21 @@ function CustomersPage() {
             {rows.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
+                  <TableCell>
+                    {(c as Customer).category && (c as Customer).category !== "retail"
+                      ? <TagBadge className="text-xs normal-case tracking-normal">{CATEGORY_LABELS[(c as Customer).category!] ?? (c as Customer).category}</TagBadge>
+                      : <span className="text-muted-foreground text-sm">Retail</span>}
+                  </TableCell>
                   <TableCell>{c.phone ?? "—"}</TableCell>
                   <TableCell className="max-w-[260px] truncate">{c.address ?? "—"}</TableCell>
                   <TableCell>
                     {c.lat != null && c.lng != null
                       ? <span className="inline-flex items-center gap-1 text-sm"><Icon icon={MapPinIcon} className="h-3.5 w-3.5" /> Sí</span>
+                      : <span className="text-muted-foreground text-sm">—</span>}
+                  </TableCell>
+                  <TableCell>
+                    {Number(c.pending_balance ?? 0) > 0
+                      ? <StatusBadge tone="danger" className="tabular-nums normal-case tracking-normal">{Number(c.pending_balance).toLocaleString("es-MX", { style: "currency", currency: "MXN" })}</StatusBadge>
                       : <span className="text-muted-foreground text-sm">—</span>}
                   </TableCell>
                   {isOwner && <TableCell>{c.branch_name ?? "—"}</TableCell>}
@@ -509,9 +539,20 @@ function CustomerDialog({
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
   const [branchId, setBranchId] = useState<string>("");
+  const [category, setCategory] = useState<string>("retail");
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  const checkPreorder = useServerFn(isBranchPreorderEnabled);
+
+  const effectiveBranchId = isOwner ? branchId : (editing?.branch_id ?? defaultBranchId ?? "");
+  const preorderQ = useQuery({
+    queryKey: ["branchPreorderEnabled", effectiveBranchId],
+    queryFn: () => checkPreorder({ data: { branch_id: effectiveBranchId } }),
+    enabled: open && !!effectiveBranchId,
+  });
+  const preorderEnabled = preorderQ.data?.preorder_enabled ?? false;
 
   useEffect(() => {
     if (!open) return;
@@ -522,6 +563,7 @@ function CustomerDialog({
     setLat(editing?.lat ?? null);
     setLng(editing?.lng ?? null);
     setBranchId(editing?.branch_id ?? defaultBranchId ?? "");
+    setCategory((editing as Customer | null)?.category ?? "retail");
     setPhotoPath(editing?.photo_url ?? null);
     setPhotoPreview(null);
     if (editing?.photo_url) {
@@ -566,6 +608,7 @@ function CustomerDialog({
         lng: lng ?? null,
         photo_url: photoPath ?? null,
         branch_id: isOwner ? branchId || null : null,
+        category: category as "retail" | "hotel" | "restaurant",
       };
       if (editing) return update({ data: { id: editing.id, ...payload } });
       return create({ data: payload });
@@ -608,6 +651,21 @@ function CustomerDialog({
               </Select>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label>Categoría</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="retail">Retail</SelectItem>
+                {preorderEnabled && <SelectItem value="hotel">Hotel</SelectItem>}
+                {preorderEnabled && <SelectItem value="restaurant">Restaurante</SelectItem>}
+              </SelectContent>
+            </Select>
+            {!preorderEnabled && category !== "retail" && (
+              <p className="text-xs text-amber-600">Activa la ruta de pedidos en la sucursal para usar hotel/restaurante.</p>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label>Foto de referencia</Label>

@@ -28,6 +28,8 @@ import {
   Logout01Icon,
   ArrowDown01Icon,
   SentIcon,
+  ShoppingBag01Icon,
+  Store01Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { BranchScopeProvider } from "@/lib/branch-scope";
@@ -42,6 +44,7 @@ export const Route = createFileRoute("/_authenticated/app")({
       queryFn: () => getMyContext(),
     });
     if (ctx.primaryRole === "driver") throw redirect({ to: "/driver" });
+    if (ctx.primaryRole === "transfer_driver") throw redirect({ to: "/supply-driver" });
     if (!ctx.primaryRole) throw redirect({ to: "/auth" });
     return ctx;
   },
@@ -77,6 +80,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/app/customers", label: "Clientes", icon: ContactIcon, roles: ["owner", "supervisor"] },
       { to: "/app/routes", label: "Rutas", icon: Route01Icon, roles: ["owner", "supervisor"] },
       { to: "/app/dispatch", label: "Despacho", icon: DeliveryTruck01Icon, roles: ["owner", "supervisor", "cashier"] },
+      { to: "/app/preorders", label: "Pedidos", icon: ShoppingBag01Icon, roles: ["owner", "supervisor", "cashier"] },
+      { to: "/app/bodega", label: "Bodega", icon: Store01Icon, roles: ["owner", "supervisor", "cashier"] },
       { to: "/app/deliveries", label: "Entregas", icon: PackageDelivered01Icon, roles: ["owner", "supervisor"] },
       { to: "/app/payments", label: "Pagos", icon: Wallet01Icon, roles: ["owner", "supervisor", "cashier"] },
       { to: "/app/expenses", label: "Gastos", icon: ReceiptTextIcon, roles: ["owner", "supervisor", "cashier"] },
@@ -91,6 +96,7 @@ function roleLabel(role: AppRole | null) {
     case "supervisor": return "Supervisor";
     case "cashier": return "Cajero";
     case "driver": return "Repartidor";
+    case "transfer_driver": return "Abastecimiento";
     default: return "Sin rol";
   }
 }
@@ -199,7 +205,7 @@ function AdminShell() {
         </Sidebar>
 
         <SidebarInset className="h-svh overflow-hidden">
-          <header className="z-20 flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-4">
+          <header className="app-top-bar sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar px-4 pb-3">
             <SidebarTrigger className="-ml-1 text-muted-foreground" />
             <Separator orientation="vertical" className="mr-1 h-4" />
             <div className="min-w-0 flex-1">

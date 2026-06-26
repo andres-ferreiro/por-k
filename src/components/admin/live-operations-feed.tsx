@@ -17,10 +17,10 @@ const TYPE_META: Record<
   Activity["type"],
   { icon: typeof PackageDelivered01Icon; cls: string }
 > = {
-  delivery: { icon: PackageDelivered01Icon, cls: "bg-emerald-100 text-emerald-700" },
-  payment: { icon: Wallet01Icon, cls: "bg-sky-100 text-sky-700" },
-  expense: { icon: ReceiptTextIcon, cls: "bg-amber-100 text-amber-800" },
-  dispatch: { icon: DeliveryTruck01Icon, cls: "bg-violet-100 text-violet-700" },
+  delivery: { icon: PackageDelivered01Icon, cls: "border-emerald-600/40 bg-emerald-500/10 text-emerald-700" },
+  payment: { icon: Wallet01Icon, cls: "border-sky-600/40 bg-sky-500/10 text-sky-700" },
+  expense: { icon: ReceiptTextIcon, cls: "border-amber-600/40 bg-amber-500/10 text-amber-700" },
+  dispatch: { icon: DeliveryTruck01Icon, cls: "border-violet-600/40 bg-violet-500/10 text-violet-700" },
 };
 
 function fmtTime(iso: string) {
@@ -35,7 +35,7 @@ function ActivityRow({ item }: { item: Activity }) {
   const meta = TYPE_META[item.type];
   return (
     <div className="flex gap-3 py-3 border-b last:border-0">
-      <div className={cn("h-9 w-9 rounded-lg flex items-center justify-center shrink-0", meta.cls)}>
+      <div className={cn("h-9 w-9 rounded-lg border flex items-center justify-center shrink-0", meta.cls)}>
         <Icon icon={meta.icon} className="h-4 w-4" />
       </div>
       <div className="flex-1 min-w-0">

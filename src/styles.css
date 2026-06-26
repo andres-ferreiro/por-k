@@ -147,8 +147,21 @@
 }
 
 @layer utilities {
-  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1.5rem); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  /** Fixed app top bars (admin header, etc.) — content sits below the notch/status bar */
+  .app-top-bar {
+    padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+    min-height: calc(3.5rem + env(safe-area-inset-top, 0px));
+  }
+  .app-shell {
+    min-height: 100dvh;
+    min-height: 100svh;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
 
   @keyframes auth-slide-up {
     from { transform: translateY(24px); opacity: 0; }
@@ -328,6 +341,7 @@
   padding: 2px 7px;
   border-radius: 20px;
   margin-top: 6px;
+  border: 1px solid transparent;
 }
 
 .stat-card-header .stat-badge {
@@ -347,18 +361,21 @@
 }
 
 .stat-badge-up {
-  background: var(--stat-up-bg);
-  color: var(--stat-up-text);
+  background: rgba(26, 107, 60, 0.1);
+  color: #1a6b3c;
+  border-color: rgba(26, 107, 60, 0.35);
 }
 
 .stat-badge-down {
-  background: var(--stat-down-bg);
-  color: var(--stat-down-text);
+  background: rgba(163, 45, 45, 0.1);
+  color: #a32d2d;
+  border-color: rgba(163, 45, 45, 0.35);
 }
 
 .stat-badge-neutral {
-  background: var(--stat-accent-subtle);
+  background: rgba(0, 99, 111, 0.1);
   color: var(--stat-accent);
+  border-color: rgba(0, 99, 111, 0.35);
 }
 
 .stat-card-header {

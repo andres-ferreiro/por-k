@@ -76,6 +76,11 @@ function RouteDetailPage() {
     return allCustomers.filter((c) => c.branch_id === route.branch_id);
   }, [allCustomers, route]);
 
+  const customerPool = useMemo(() => {
+    if (!route) return "retail" as const;
+    return route.route_mode === "preorder" ? "preorder" as const : "retail" as const;
+  }, [route]);
+
   const stopsDirty = useMemo(
     () => stopIds.length !== savedStopIds.length || stopIds.some((id, i) => id !== savedStopIds[i]),
     [stopIds, savedStopIds],
@@ -119,6 +124,7 @@ function RouteDetailPage() {
             <h1 className="text-2xl font-semibold tracking-tight">{route.name}</h1>
             <p className="text-muted-foreground">
               {isOwner && route.branch_name ? `${route.branch_name} · ` : ""}
+              {route.route_mode === "preorder" ? "Ruta de pedidos · " : ""}
               {stopIds.length} {stopIds.length === 1 ? "cliente" : "clientes"}
               {isDirty && <span className="text-amber-600"> · Cambios sin guardar</span>}
             </p>
@@ -159,6 +165,7 @@ function RouteDetailPage() {
         importBatches={importBatches ?? []}
         stopIds={stopIds}
         onStopIdsChange={setStopIds}
+        customerPool={customerPool}
       />
     </div>
   );

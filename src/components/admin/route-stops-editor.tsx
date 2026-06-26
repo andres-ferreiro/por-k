@@ -17,6 +17,7 @@ export interface RouteCustomer {
   name: string;
   address: string | null;
   phone?: string | null;
+  category?: string;
   created_at?: string;
   import_batch_id?: string | null;
   import_position?: number | null;
@@ -62,11 +63,13 @@ export function RouteStopsEditor({
   importBatches,
   stopIds,
   onStopIdsChange,
+  customerPool = "all",
 }: {
   customers: RouteCustomer[];
   importBatches: ImportBatch[];
   stopIds: string[];
   onStopIdsChange: (ids: string[]) => void;
+  customerPool?: "all" | "retail" | "preorder";
 }) {
   const [search, setSearch] = useState("");
   const [batchFilter, setBatchFilter] = useState<string>("all");
@@ -80,10 +83,20 @@ export function RouteStopsEditor({
     return m;
   }, [customers]);
 
+  const poolFiltered = useMemo(() => {
+    if (customerPool === "preorder") {
+      return customers.filter((c) => c.category === "hotel" || c.category === "restaurant");
+    }
+    if (customerPool === "retail") {
+      return customers.filter((c) => !c.category || c.category === "retail");
+    }
+    return customers;
+  }, [customers, customerPool]);
+
   const batchCustomers = useMemo(() => {
-    if (batchFilter === "all") return customers;
-    return customers.filter((c) => c.import_batch_id === batchFilter);
-  }, [customers, batchFilter]);
+    if (batchFilter === "all") return poolFiltered;
+    return poolFiltered.filter((c) => c.import_batch_id === batchFilter);
+  }, [poolFiltered, batchFilter]);
 
   const availableCustomers = useMemo(() => {
     let list = batchCustomers.filter((c) => !stopIds.includes(c.id));

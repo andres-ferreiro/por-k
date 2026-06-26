@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  ArrowDown01Icon,
   Delete02Icon,
   SentIcon,
   TruckDeliveryIcon,
@@ -19,6 +20,9 @@ import {
   getTruckReconciliation,
   getTruckReturnForDispatch,
   registerTruckReturn,
+  createCrossBranchLoad,
+  listCrossBranchLoadsToday,
+  listExternalDrivers,
 } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { getBranchDispatchGate, setBranchRequireDispatch, getBranchLocationGate, setBranchLocationEnabled } from "@/lib/api/branches.functions";
@@ -44,8 +48,19 @@ import {
 import { toast } from "sonner";
 import { fmtQty } from "@/lib/format";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
 import { FilterDatePicker, PageHeader } from "@/components/admin/data-table";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/app/dispatch")({
   component: DispatchPage,
@@ -99,17 +114,14 @@ function DispatchPage() {
       />
 
       {(role === "owner" || role === "supervisor") && (
-        <div className="space-y-2">
-          <DispatchGateSettings role={role} />
-          <LocationGateSettings role={role} />
-        </div>
+        <BranchSettingsCollapsible role={role} />
       )}
 
       <DispatchDayStats date={date} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5 xl:items-start">
         <div className="xl:col-span-2">
-          <NewDispatchCard />
+          <DispatchFormsCard />
         </div>
         <div className="xl:col-span-3 space-y-4">
           <DailySummaryCard date={date} />
@@ -438,7 +450,143 @@ function ClearDayMovementsCard({ date: pageDate }: { date: string }) {
   );
 }
 
-function NewDispatchCard() {
+function BranchSettingsCollapsible({ role }: { role: string | undefined }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-4 py-2.5 text-sm font-medium hover:bg-muted/50 transition-colors"
+        >
+          Configuración de sucursal
+          <Icon
+            icon={ArrowDown01Icon}
+            className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")}
+          />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-2 pt-2">
+        <DispatchGateSettings role={role} />
+        <LocationGateSettings role={role} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function DispatchFormsCard() {
+  return (
+    <Card className="relative overflow-visible">
+      <CardHeader className="py-3 pb-0">
+        <div className="flex items-center gap-2">
+          <Icon icon={TruckDeliveryIcon} className="h-5 w-5 text-primary" />
+          <CardTitle className="text-base">Registrar carga</CardTitle>
+        </div>
+        <CardDescription className="text-xs">
+          Despacho de ruta o entrega a repartidor de otra sucursal.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-3">
+        <Tabs defaultValue="route">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="route">Despacho de ruta</TabsTrigger>
+            <TabsTrigger value="external">Carga externa</TabsTrigger>
+          </TabsList>
+          <TabsContent value="route" className="mt-3">
+            <NewDispatchForm />
+          </TabsContent>
+          <TabsContent value="external" className="mt-3">
+            <CrossBranchLoadForm />
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+}
+
+type ExternalDriverOption = {
+  id: string;
+  full_name: string | null;
+  branch_id: string;
+  branch_name: string | null;
+};
+
+function ExternalDriverCombobox({
+  value,
+  onChange,
+  drivers,
+  disabled,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  drivers: ExternalDriverOption[];
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = drivers.find((d) => d.id === value);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, ExternalDriverOption[]>();
+    for (const d of drivers) {
+      const key = d.branch_name ?? "Sin sucursal";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(d);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, "es"));
+  }, [drivers]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className="w-full justify-between font-normal h-10 px-3"
+        >
+          {selected ? (
+            <span className="truncate text-left">
+              <span className="font-medium">{selected.full_name ?? "Sin nombre"}</span>
+              <span className="text-muted-foreground"> · {selected.branch_name ?? "—"}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Selecciona repartidor externo</span>
+          )}
+          <Icon icon={ArrowDown01Icon} className="h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Buscar por nombre o sucursal…" />
+          <CommandList>
+            <CommandEmpty>No hay repartidores de otras sucursales.</CommandEmpty>
+            {grouped.map(([branchName, branchDrivers]) => (
+              <CommandGroup key={branchName} heading={branchName}>
+                {branchDrivers.map((d) => (
+                  <CommandItem
+                    key={d.id}
+                    value={`${d.full_name ?? ""} ${branchName}`}
+                    onSelect={() => {
+                      onChange(d.id);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="truncate">{d.full_name ?? d.id.slice(0, 8)}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function NewDispatchForm() {
   const qc = useQueryClient();
   const { branchId } = useBranchScope();
   const routesFn = useServerFn(listRoutesForDispatch);
@@ -556,14 +704,7 @@ function NewDispatchCard() {
   const canSubmit = !!routeId && !!driverId && hasProductLines && !mut.isPending;
 
   return (
-    <Card className="relative overflow-visible">
-      <CardHeader className="py-3">
-        <div className="flex items-center gap-2">
-          <Icon icon={TruckDeliveryIcon} className="h-5 w-5 text-primary" />
-          <CardTitle className="text-base">Nuevo despacho</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 pt-0">
+    <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>Ruta</Label>
@@ -724,8 +865,7 @@ function NewDispatchCard() {
           <Icon icon={SentIcon} className="h-4 w-4 mr-1" />
           {mut.isPending ? "Registrando…" : "Registrar despacho"}
         </Button>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -1132,5 +1272,148 @@ function ReconciliationCard({ date }: { date: string }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CrossBranchLoadForm() {
+  const qc = useQueryClient();
+  const { branchId } = useBranchScope();
+  const productsFn = useServerFn(listProductsActive);
+  const createFn = useServerFn(createCrossBranchLoad);
+  const listFn = useServerFn(listCrossBranchLoadsToday);
+  const externalDriversFn = useServerFn(listExternalDrivers);
+  const ctxFn = useServerFn(getMyContext);
+  const { data: ctx } = useQuery({ queryKey: ["myContext"], queryFn: () => ctxFn() });
+
+  const { data: products } = useQuery({ queryKey: ["dispatch", "products"], queryFn: () => productsFn() });
+  const { data: externalDrivers, isLoading: driversLoading } = useQuery({
+    queryKey: ["dispatch", "external-drivers", branchId],
+    queryFn: () => externalDriversFn({ data: { branch_id: branchId } }),
+  });
+  const { data: todayLoads } = useQuery({
+    queryKey: ["cross-branch-loads", "today", branchId],
+    queryFn: () => listFn({ data: { branch_id: branchId } }),
+  });
+
+  const [driverId, setDriverId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [qtyByProduct, setQtyByProduct] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!products?.length) return;
+    setQtyByProduct((prev) => {
+      const next = { ...prev };
+      for (const p of products) {
+        if (!(p.id in next)) next[p.id] = "";
+      }
+      return next;
+    });
+  }, [products]);
+
+  const hasLines = (products ?? []).some((p) => Number(qtyByProduct[p.id]) > 0);
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!driverId) throw new Error("Selecciona un repartidor externo.");
+      const items = (products ?? [])
+        .filter((p) => qtyByProduct[p.id] && Number(qtyByProduct[p.id]) > 0)
+        .map((p) => ({ product_id: p.id, quantity: Number(qtyByProduct[p.id]) }));
+      if (items.length === 0) throw new Error("Agrega al menos un producto.");
+      return createFn({ data: { driver_id: driverId, notes: notes.trim() || null, items } });
+    },
+    onSuccess: () => {
+      toast.success("Carga externa registrada");
+      setDriverId("");
+      setNotes("");
+      setQtyByProduct(Object.fromEntries((products ?? []).map((p) => [p.id, ""])));
+      qc.invalidateQueries({ queryKey: ["cross-branch-loads"] });
+      qc.invalidateQueries({ queryKey: ["driver", "dispatchStock"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Error al registrar"),
+  });
+
+  const role = ctx?.primaryRole;
+  if (!role || !(role === "cashier" || role === "supervisor" || role === "owner")) return null;
+
+  const driverOptions = externalDrivers ?? [];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Productos entregados a un repartidor de otra sucursal. No incluye sus ventas ni sus tiendas.
+      </p>
+
+      <div className="space-y-1.5">
+        <Label>Repartidor externo</Label>
+        <ExternalDriverCombobox
+          value={driverId}
+          onChange={setDriverId}
+          drivers={driverOptions}
+          disabled={driversLoading}
+        />
+        <p className="text-xs text-muted-foreground">
+          El repartidor deberá registrar el costo como gasto con foto del ticket.
+        </p>
+      </div>
+
+        <div className="space-y-2">
+          <Label>Artículos entregados</Label>
+          <div className="space-y-1 max-h-[240px] overflow-y-auto rounded-lg border p-1.5">
+            {(products ?? []).length === 0 && (
+              <p className="text-sm text-muted-foreground py-4 text-center">No hay productos activos.</p>
+            )}
+            {(products ?? []).map((p) => (
+              <div
+                key={p.id}
+                className={`flex items-center gap-2 rounded-lg border p-2 ${Number(qtyByProduct[p.id]) > 0 ? "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800" : ""}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{p.name}</div>
+                  <div className="text-xs text-muted-foreground">{p.unit}</div>
+                </div>
+                <div className="relative w-24 shrink-0">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    placeholder="0"
+                    value={qtyByProduct[p.id] ?? ""}
+                    onChange={(e) => setQtyByProduct((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                    className="text-right tabular-nums pr-8"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Notas (opcional)</Label>
+          <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} placeholder="Ej: cobrado en efectivo" />
+        </div>
+
+        <Button onClick={() => mut.mutate()} disabled={!driverId || !hasLines || mut.isPending} className="w-full bg-amber-600 hover:bg-amber-700">
+          <Icon icon={SentIcon} className="h-4 w-4 mr-1" />
+          {mut.isPending ? "Registrando…" : "Registrar carga externa"}
+        </Button>
+
+        {(todayLoads ?? []).length > 0 && (
+          <div className="space-y-1.5 pt-1">
+            <Label className="text-xs text-muted-foreground">Cargas externas registradas hoy</Label>
+            {todayLoads!.map((l) => (
+              <div key={l.id} className="flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{l.driver_name ?? l.driver_id.slice(0, 8)}</div>
+                  <div className="text-xs text-muted-foreground">{fmtQty(l.total_units)} unidades</div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {new Date(l.created_at).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit", timeZone: APP_TZ })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
   );
 }

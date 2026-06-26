@@ -40,7 +40,7 @@ export const listRoutes = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("routes")
-      .select("id, branch_id, name, driver_id, is_active, branches(name), route_customers(count)")
+      .select("id, branch_id, name, driver_id, is_active, route_mode, branches!routes_branch_id_fkey(name), route_customers(count)")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     const driverNames = await fetchDriverNames((data ?? []).map((r: any) => r.driver_id).filter(Boolean));
@@ -52,6 +52,7 @@ export const listRoutes = createServerFn({ method: "GET" })
       driver_id: r.driver_id,
       driver_name: r.driver_id ? driverNames.get(r.driver_id) ?? null : null,
       is_active: r.is_active,
+      route_mode: (r.route_mode as string) ?? "dispatch",
       customer_count: r.route_customers?.[0]?.count ?? 0,
     }));
   });
@@ -62,7 +63,7 @@ export const getRoute = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: route, error } = await context.supabase
       .from("routes")
-      .select("id, branch_id, name, driver_id, is_active, branches(name)")
+      .select("id, branch_id, name, driver_id, is_active, route_mode, branches!routes_branch_id_fkey(name)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -85,6 +86,7 @@ export const getRoute = createServerFn({ method: "POST" })
       driver_id: route.driver_id,
       driver_name: route.driver_id ? driverNames.get(route.driver_id) ?? null : null,
       is_active: route.is_active,
+      route_mode: (route.route_mode as string) ?? "dispatch",
       stops: (stops ?? []).map((s: any) => ({ position: s.position, ...s.customers })),
     };
   });
@@ -145,6 +147,36 @@ export const setRouteCustomers = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
+    const { data: route, error: rErr } = await context.supabase
+      .from("routes")
+      .select("route_mode, branch_id")
+      .eq("id", data.route_id)
+      .maybeSingle();
+    if (rErr) throw new Error(rErr.message);
+    if (!route) throw new Error("Ruta no encontrada.");
+
+    if (data.customer_ids.length > 0) {
+      const { data: customers, error: cErr } = await context.supabase
+        .from("customers")
+        .select("id, category, branch_id")
+        .in("id", data.customer_ids);
+      if (cErr) throw new Error(cErr.message);
+
+      const isPreorder = route.route_mode === "preorder";
+      for (const c of customers ?? []) {
+        if ((c as any).branch_id !== route.branch_id) {
+          throw new Error("Todos los clientes deben pertenecer a la misma sucursal que la ruta.");
+        }
+        const cat = (c as any).category as string;
+        if (isPreorder && cat === "retail") {
+          throw new Error("La ruta de pedidos solo admite clientes hotel o restaurante.");
+        }
+        if (!isPreorder && (cat === "hotel" || cat === "restaurant")) {
+          throw new Error("Los clientes hotel/restaurante solo pueden ir en la ruta de pedidos.");
+        }
+      }
+    }
+
     // Replace pivot. Delete all then insert in order.
     const { error: delErr } = await context.supabase
       .from("route_customers")

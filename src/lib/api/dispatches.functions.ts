@@ -60,6 +60,7 @@ export const listProductsActive = createServerFn({ method: "GET" })
       .from("products")
       .select("id, name, unit")
       .eq("is_active", true)
+      .eq("is_bodega_supply", false)
       .order("display_order", { ascending: true })
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -492,4 +493,222 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
         totals,
       };
     }).sort((a, b) => (a.route_name ?? "").localeCompare(b.route_name ?? ""));
+  });
+
+// Returns remaining stock (cargado − vendido hoy) per product for the calling driver's active route/dispatch.
+// Used by the driver app to enforce sell limits.
+export const getMyDispatchStock = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabase, userId } = context;
+    const today = todayInTZ();
+
+    // Find driver's active route
+    const { data: routes, error: rErr } = await supabase
+      .from("routes")
+      .select("id, branch_id")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
+
+    // Find today's dispatch for this route+driver
+    const { startISO, endISO } = tzDayRange(today);
+    const { data: dispatch, error: dErr } = await supabase
+      .from("dispatches")
+      .select("id, dispatch_items(product_id, quantity)")
+      .eq("route_id", route.id)
+      .eq("driver_id", userId)
+      .gte("dispatched_at", startISO)
+      .lt("dispatched_at", endISO)
+      .order("dispatched_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (dErr) throw new Error(dErr.message);
+    if (!dispatch) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
+
+    // Build loaded map
+    const loaded: Record<string, number> = {};
+    for (const item of (dispatch as any).dispatch_items ?? []) {
+      loaded[item.product_id] = (loaded[item.product_id] ?? 0) + Number(item.quantity);
+    }
+
+    // Sum already sold today
+    const { data: deliveries, error: delErr } = await supabase
+      .from("deliveries")
+      .select("delivery_items(product_id, quantity)")
+      .eq("route_id", route.id)
+      .eq("driver_id", userId)
+      .eq("delivery_date", today)
+      .eq("status", "delivered");
+    if (delErr) throw new Error(delErr.message);
+
+    const sold: Record<string, number> = {};
+    for (const del of deliveries ?? []) {
+      for (const it of (del as any).delivery_items ?? []) {
+        sold[it.product_id] = (sold[it.product_id] ?? 0) + Number(it.quantity);
+      }
+    }
+
+    // Remaining = loaded − sold (floor at 0)
+    const stock: Record<string, number> = {};
+    for (const [pid, qty] of Object.entries(loaded)) {
+      stock[pid] = Math.max(0, qty - (sold[pid] ?? 0));
+    }
+
+    // Also include any cross-branch loads for this driver today
+    const { data: crossLoads, error: clErr } = await supabase
+      .from("cross_branch_loads")
+      .select("id, cross_branch_load_items(product_id, quantity)")
+      .eq("driver_id", userId)
+      .gte("created_at", startISO)
+      .lt("created_at", endISO);
+    if (clErr) throw new Error(clErr.message);
+    for (const cl of crossLoads ?? []) {
+      for (const it of (cl as any).cross_branch_load_items ?? []) {
+        stock[it.product_id] = (stock[it.product_id] ?? 0) + Number(it.quantity);
+      }
+    }
+
+    const totalUnits = Object.values(stock).reduce((a, b) => a + b, 0);
+
+    return {
+      dispatch_id: (dispatch as any).id as string,
+      stock,
+      total_units: totalUnits,
+    };
+  });
+
+// ============ CROSS-BRANCH LOADS ============
+
+export const listExternalDrivers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ branch_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
+    if (!branchId) return [] as { id: string; full_name: string | null; branch_id: string; branch_name: string | null }[];
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: driverRoles, error: rolesErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "driver");
+    if (rolesErr) throw new Error(rolesErr.message);
+    const driverIds = (driverRoles ?? []).map((r: any) => r.user_id);
+    if (driverIds.length === 0) {
+      return [] as { id: string; full_name: string | null; branch_id: string; branch_name: string | null }[];
+    }
+
+    const { data: rows, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, branch_id, branches(name)")
+      .eq("is_active", true)
+      .neq("branch_id", branchId)
+      .in("id", driverIds)
+      .not("branch_id", "is", null);
+    if (error) throw new Error(error.message);
+
+    return (rows ?? [])
+      .map((r: any) => ({
+        id: r.id as string,
+        full_name: (r.full_name as string | null) ?? null,
+        branch_id: r.branch_id as string,
+        branch_name: ((r.branches as { name?: string | null } | null)?.name as string | null) ?? null,
+      }))
+      .sort((a, b) => {
+        const byBranch = (a.branch_name ?? "").localeCompare(b.branch_name ?? "", "es");
+        if (byBranch !== 0) return byBranch;
+        return (a.full_name ?? "").localeCompare(b.full_name ?? "", "es");
+      });
+  });
+
+const crossLoadItemSchema = z.object({
+  product_id: z.string().uuid(),
+  quantity: z.number().positive().max(1_000_000),
+});
+
+const createCrossBranchLoadSchema = z.object({
+  driver_id: z.string().uuid(),
+  notes: z.string().trim().max(500).optional().nullable(),
+  items: z.array(crossLoadItemSchema).min(1).max(50),
+});
+
+export const createCrossBranchLoad = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => {
+    const parsed = createCrossBranchLoadSchema.parse(d);
+    const ids = parsed.items.map((i) => i.product_id);
+    if (new Set(ids).size !== ids.length) throw new Error("No repitas productos en las líneas.");
+    return parsed;
+  })
+  .handler(async ({ data, context }) => {
+    const branchId = await resolveBranchId(context.supabase, context.userId, null);
+    if (!branchId) throw new Error("Tu cuenta no tiene sucursal asignada.");
+
+    const { data: inserted, error: insErr } = await context.supabase
+      .from("cross_branch_loads")
+      .insert({
+        branch_id: branchId,
+        driver_id: data.driver_id,
+        created_by: context.userId,
+        notes: data.notes ?? null,
+      })
+      .select("id")
+      .single();
+    if (insErr) throw new Error(insErr.message);
+
+    const loadId = inserted.id as string;
+    const rows = data.items.map((i) => ({
+      cross_branch_load_id: loadId,
+      product_id: i.product_id,
+      quantity: i.quantity,
+    }));
+    const { error: itemsErr } = await context.supabase.from("cross_branch_load_items").insert(rows);
+    if (itemsErr) {
+      await context.supabase.from("cross_branch_loads").delete().eq("id", loadId);
+      throw new Error(itemsErr.message);
+    }
+    return { id: loadId };
+  });
+
+export const listCrossBranchLoadsToday = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ date: dateOnly, branch_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
+    const dateStr = data.date ?? todayInTZ();
+    const { startISO, endISO } = tzDayRange(dateStr);
+
+    let q = context.supabase
+      .from("cross_branch_loads")
+      .select("id, created_at, driver_id, notes, cross_branch_load_items(quantity)")
+      .gte("created_at", startISO)
+      .lt("created_at", endISO)
+      .order("created_at", { ascending: false });
+    if (branchId) q = q.eq("branch_id", branchId);
+    const { data: rows, error } = await q;
+    if (error) throw new Error(error.message);
+
+    const driverIds = (rows ?? []).map((r: any) => r.driver_id).filter(Boolean);
+    const names = await fetchProfileNames(driverIds);
+
+    return (rows ?? []).map((r: any) => {
+      const items = (r.cross_branch_load_items ?? []) as { quantity: number }[];
+      const totalUnits = items.reduce((acc, it) => acc + Number(it.quantity ?? 0), 0);
+      return {
+        id: r.id as string,
+        created_at: r.created_at as string,
+        driver_id: r.driver_id as string,
+        driver_name: names.get(r.driver_id) ?? null,
+        notes: (r.notes as string | null) ?? null,
+        total_units: totalUnits,
+      };
+    });
   });

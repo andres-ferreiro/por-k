@@ -1,6 +1,6 @@
 import { Download01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
@@ -15,6 +15,7 @@ import {
 import { listDeliveriesAdmin, getDeliveryDetailAdmin } from "@/lib/api/admin.functions";
 import { listRoutesForDispatch } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
+import { getMyContext } from "@/lib/api/context.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
@@ -25,11 +26,20 @@ import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
   FilterSelect, FilterDateRangePicker,
 } from "@/components/admin/data-table";
-import { DeliveryStatusBadge, PaymentStatusBadge, StatusBadge } from "@/components/admin/status-badge";
+import { DeliveryStatusBadge, PaymentStatusBadge, StatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { StatCardBar, StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
 import { fmtMoney } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/app/deliveries")({
+  loader: async ({ context }) => {
+    const ctx = await context.queryClient.fetchQuery({
+      queryKey: ["myContext"],
+      queryFn: () => getMyContext(),
+    });
+    const allowed = ctx.roles.some((r) => r === "owner" || r === "supervisor");
+    if (!allowed) throw redirect({ to: "/app" });
+    return ctx;
+  },
   component: DeliveriesPage,
 });
 
@@ -217,9 +227,23 @@ function DeliveriesPage() {
                   {new Date(r.created_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
                 </TableCell>
                 <TableCell className="max-w-[180px] truncate">{r.customer_name ?? "—"}</TableCell>
-                <TableCell>{r.route_name ?? "—"}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <span>{r.route_name ?? "—"}</span>
+                    {(r as any).route_mode === "preorder" && (
+                      <TagBadge className="text-[10px] px-1">Pedido</TagBadge>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell>{r.driver_name ?? "—"}</TableCell>
-                <TableCell><DeliveryStatusBadge status={r.status} /></TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <DeliveryStatusBadge status={r.status} />
+                    {r.status === "failed" && r.failure_reason === "closed" && (
+                      <span className="text-xs text-rose-600 font-medium">Cerrada</span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {r.units}{r.return_units > 0 && <span className="text-xs text-muted-foreground"> (−{r.return_units})</span>}
                 </TableCell>

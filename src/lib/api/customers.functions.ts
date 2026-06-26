@@ -30,7 +30,7 @@ export const listCustomers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("customers")
-      .select("id, branch_id, name, phone, address, lat, lng, photo_url, notes, is_active, created_at, import_batch_id, import_position, branches(name)")
+      .select("id, branch_id, name, phone, address, lat, lng, photo_url, notes, is_active, pending_balance, category, created_at, import_batch_id, import_position, branches(name)")
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
     return (data ?? []).map((c: any) => ({ ...c, branch_name: c.branches?.name ?? null }));
@@ -58,6 +58,8 @@ export const listCustomerImportBatches = createServerFn({ method: "POST" })
     }));
   });
 
+const customerCategoryEnum = z.enum(["retail", "hotel", "restaurant"]);
+
 const customerInput = z.object({
   name: z.string().trim().min(1).max(120),
   phone: z.string().max(50).nullable().optional(),
@@ -67,13 +69,33 @@ const customerInput = z.object({
   photo_url: z.string().max(500).nullable().optional(),
   notes: z.string().max(1000).nullable().optional(),
   branch_id: z.string().uuid().nullable().optional(),
+  category: customerCategoryEnum.optional(),
 });
+
+async function validateCustomerCategory(
+  supabase: any,
+  branchId: string,
+  category: string,
+) {
+  if (category === "retail") return;
+  const { data: branch, error } = await supabase
+    .from("branches")
+    .select("preorder_enabled")
+    .eq("id", branchId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!branch?.preorder_enabled) {
+    throw new Error("Esta sucursal no tiene ruta de pedidos activada para clientes hotel/restaurante.");
+  }
+}
 
 export const createCustomer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => customerInput.parse(d))
   .handler(async ({ data, context }) => {
     const branch_id = await resolveBranchId(context.supabase, context.userId, data.branch_id ?? null);
+    const category = data.category ?? "retail";
+    await validateCustomerCategory(context.supabase, branch_id, category);
     const { data: row, error } = await context.supabase
       .from("customers")
       .insert({
@@ -85,6 +107,7 @@ export const createCustomer = createServerFn({ method: "POST" })
         lng: data.lng ?? null,
         photo_url: data.photo_url ?? null,
         notes: data.notes ?? null,
+        category,
       })
       .select()
       .single();
@@ -153,10 +176,20 @@ export const updateCustomer = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid() }).merge(customerInput.partial()).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const { id, branch_id: _ignore, ...patch } = data;
+    const { id, branch_id: _ignore, category, ...patch } = data;
+    if (category) {
+      const { data: cust } = await context.supabase
+        .from("customers")
+        .select("branch_id")
+        .eq("id", id)
+        .maybeSingle();
+      if (cust?.branch_id) {
+        await validateCustomerCategory(context.supabase, cust.branch_id as string, category);
+      }
+    }
     const { data: row, error } = await context.supabase
       .from("customers")
-      .update(patch)
+      .update({ ...patch, ...(category ? { category } : {}) })
       .eq("id", id)
       .select()
       .single();

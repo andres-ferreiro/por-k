@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { badgeToneClass } from "@/lib/badge-tones";
 
 export function DeltaBadge({
   current,
@@ -22,10 +23,7 @@ export function DeltaBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums",
-        good
-          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-          : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400",
+        badgeToneClass(good ? "success" : "danger", "rounded-full px-1.5 py-0.5 text-xs font-semibold tabular-nums normal-case tracking-normal"),
       )}
     >
       {isUp ? "↑" : "↓"} {Math.abs(pct)}%

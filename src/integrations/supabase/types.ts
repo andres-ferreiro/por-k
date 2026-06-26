@@ -17,38 +17,282 @@ export type Database = {
       branches: {
         Row: {
           address: string | null
+          bodega_display_name: string | null
           created_at: string
           driver_location_enabled: boolean
           id: string
           is_active: boolean
+          is_bodega: boolean
           name: string
           phone: string | null
+          preorder_enabled: boolean
+          preorder_route_id: string | null
           require_dispatch_before_route: boolean
           updated_at: string
         }
         Insert: {
           address?: string | null
+          bodega_display_name?: string | null
           created_at?: string
           driver_location_enabled?: boolean
           id?: string
           is_active?: boolean
+          is_bodega?: boolean
           name: string
           phone?: string | null
+          preorder_enabled?: boolean
+          preorder_route_id?: string | null
           require_dispatch_before_route?: boolean
           updated_at?: string
         }
         Update: {
           address?: string | null
+          bodega_display_name?: string | null
           created_at?: string
           driver_location_enabled?: boolean
           id?: string
           is_active?: boolean
+          is_bodega?: boolean
           name?: string
           phone?: string | null
+          preorder_enabled?: boolean
+          preorder_route_id?: string | null
           require_dispatch_before_route?: boolean
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "branches_preorder_route_id_fkey"
+            columns: ["preorder_route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      branch_supply_order_items: {
+        Row: {
+          correction_quantity: number | null
+          created_at: string
+          id: string
+          order_id: string
+          product_id: string
+          quantity: number
+          received_quantity: number | null
+        }
+        Insert: {
+          correction_quantity?: number | null
+          created_at?: string
+          id?: string
+          order_id: string
+          product_id: string
+          quantity: number
+          received_quantity?: number | null
+        }
+        Update: {
+          correction_quantity?: number | null
+          created_at?: string
+          id?: string
+          order_id?: string
+          product_id?: string
+          quantity?: number
+          received_quantity?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "branch_supply_order_items_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "branch_supply_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "branch_supply_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      branch_supply_orders: {
+        Row: {
+          bodega_id: string
+          branch_id: string
+          branch_receipt_note: string | null
+          branch_receipt_status: Database["public"]["Enums"]["branch_receipt_status"] | null
+          correction_delivered_at: string | null
+          correction_status: Database["public"]["Enums"]["supply_correction_status"] | null
+          created_at: string
+          delivery_date: string
+          id: string
+          notes: string | null
+          order_source: string
+          placed_at: string
+          placed_by: string
+          status: Database["public"]["Enums"]["supply_order_status"]
+          updated_at: string
+        }
+        Insert: {
+          bodega_id: string
+          branch_id: string
+          branch_receipt_note?: string | null
+          branch_receipt_status?: Database["public"]["Enums"]["branch_receipt_status"] | null
+          correction_delivered_at?: string | null
+          correction_status?: Database["public"]["Enums"]["supply_correction_status"] | null
+          created_at?: string
+          delivery_date: string
+          id?: string
+          notes?: string | null
+          order_source?: string
+          placed_at?: string
+          placed_by: string
+          status?: Database["public"]["Enums"]["supply_order_status"]
+          updated_at?: string
+        }
+        Update: {
+          bodega_id?: string
+          branch_id?: string
+          branch_receipt_note?: string | null
+          branch_receipt_status?: Database["public"]["Enums"]["branch_receipt_status"] | null
+          correction_delivered_at?: string | null
+          correction_status?: Database["public"]["Enums"]["supply_correction_status"] | null
+          created_at?: string
+          delivery_date?: string
+          id?: string
+          notes?: string | null
+          order_source?: string
+          placed_at?: string
+          placed_by?: string
+          status?: Database["public"]["Enums"]["supply_order_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "branch_supply_orders_bodega_id_fkey"
+            columns: ["bodega_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "branch_supply_orders_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "branch_supply_orders_placed_by_fkey"
+            columns: ["placed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cross_branch_load_items: {
+        Row: {
+          cross_branch_load_id: string
+          id: string
+          product_id: string
+          quantity: number
+        }
+        Insert: {
+          cross_branch_load_id: string
+          id?: string
+          product_id: string
+          quantity: number
+        }
+        Update: {
+          cross_branch_load_id?: string
+          id?: string
+          product_id?: string
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cross_branch_load_items_cross_branch_load_id_fkey"
+            columns: ["cross_branch_load_id"]
+            isOneToOne: false
+            referencedRelation: "cross_branch_loads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cross_branch_load_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cross_branch_loads: {
+        Row: {
+          branch_id: string
+          created_at: string
+          created_by: string | null
+          driver_id: string
+          id: string
+          notes: string | null
+        }
+        Insert: {
+          branch_id: string
+          created_at?: string
+          created_by?: string | null
+          driver_id: string
+          id?: string
+          notes?: string | null
+        }
+        Update: {
+          branch_id?: string
+          created_at?: string
+          created_by?: string | null
+          driver_id?: string
+          id?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cross_branch_loads_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_import_batches: {
+        Row: {
+          branch_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string | null
+        }
+        Insert: {
+          branch_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string | null
+        }
+        Update: {
+          branch_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_import_batches_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customer_prices: {
         Row: {
@@ -89,34 +333,125 @@ export type Database = {
           },
         ]
       }
-      customer_import_batches: {
+      customer_order_items: {
+        Row: {
+          created_at: string
+          id: string
+          order_id: string
+          product_id: string
+          quantity: number
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          order_id: string
+          product_id: string
+          quantity: number
+          unit_price: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          order_id?: string
+          product_id?: string
+          quantity?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_order_items_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "customer_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_orders: {
         Row: {
           branch_id: string
           created_at: string
-          created_by: string | null
+          customer_id: string
+          delivery_date: string
+          delivery_id: string | null
           id: string
-          label: string | null
+          notes: string | null
+          placed_at: string
+          placed_by: string | null
+          route_id: string
+          status: Database["public"]["Enums"]["order_status"]
+          updated_at: string
         }
         Insert: {
           branch_id: string
           created_at?: string
-          created_by?: string | null
+          customer_id: string
+          delivery_date: string
+          delivery_id?: string | null
           id?: string
-          label?: string | null
+          notes?: string | null
+          placed_at?: string
+          placed_by?: string | null
+          route_id: string
+          status?: Database["public"]["Enums"]["order_status"]
+          updated_at?: string
         }
         Update: {
           branch_id?: string
           created_at?: string
-          created_by?: string | null
+          customer_id?: string
+          delivery_date?: string
+          delivery_id?: string | null
           id?: string
-          label?: string | null
+          notes?: string | null
+          placed_at?: string
+          placed_by?: string | null
+          route_id?: string
+          status?: Database["public"]["Enums"]["order_status"]
+          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "customer_import_batches_branch_id_fkey"
+            foreignKeyName: "customer_orders_branch_id_fkey"
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_orders_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_orders_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_orders_placed_by_fkey"
+            columns: ["placed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_orders_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
             referencedColumns: ["id"]
           },
         ]
@@ -125,6 +460,7 @@ export type Database = {
         Row: {
           address: string | null
           branch_id: string
+          category: Database["public"]["Enums"]["customer_category"]
           created_at: string
           id: string
           import_batch_id: string | null
@@ -134,6 +470,7 @@ export type Database = {
           lng: number | null
           name: string
           notes: string | null
+          pending_balance: number
           phone: string | null
           photo_url: string | null
           updated_at: string
@@ -141,6 +478,7 @@ export type Database = {
         Insert: {
           address?: string | null
           branch_id: string
+          category?: Database["public"]["Enums"]["customer_category"]
           created_at?: string
           id?: string
           import_batch_id?: string | null
@@ -150,6 +488,7 @@ export type Database = {
           lng?: number | null
           name: string
           notes?: string | null
+          pending_balance?: number
           phone?: string | null
           photo_url?: string | null
           updated_at?: string
@@ -157,6 +496,7 @@ export type Database = {
         Update: {
           address?: string | null
           branch_id?: string
+          category?: Database["public"]["Enums"]["customer_category"]
           created_at?: string
           id?: string
           import_batch_id?: string | null
@@ -166,6 +506,7 @@ export type Database = {
           lng?: number | null
           name?: string
           notes?: string | null
+          pending_balance?: number
           phone?: string | null
           photo_url?: string | null
           updated_at?: string
@@ -195,6 +536,10 @@ export type Database = {
           customer_id: string
           delivery_date: string
           driver_id: string
+          failure_photo_url: string | null
+          failure_reason:
+            | Database["public"]["Enums"]["delivery_failure_reason"]
+            | null
           id: string
           photo_url: string | null
           route_id: string
@@ -208,6 +553,10 @@ export type Database = {
           customer_id: string
           delivery_date?: string
           driver_id: string
+          failure_photo_url?: string | null
+          failure_reason?:
+            | Database["public"]["Enums"]["delivery_failure_reason"]
+            | null
           id?: string
           photo_url?: string | null
           route_id: string
@@ -221,6 +570,10 @@ export type Database = {
           customer_id?: string
           delivery_date?: string
           driver_id?: string
+          failure_photo_url?: string | null
+          failure_reason?:
+            | Database["public"]["Enums"]["delivery_failure_reason"]
+            | null
           id?: string
           photo_url?: string | null
           route_id?: string
@@ -348,6 +701,27 @@ export type Database = {
           },
         ]
       }
+      dev_demo_entities: {
+        Row: {
+          created_at: string
+          id: string
+          record_id: string
+          table_name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          record_id: string
+          table_name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          record_id?: string
+          table_name?: string
+        }
+        Relationships: []
+      }
       dispatch_items: {
         Row: {
           created_at: string
@@ -455,6 +829,47 @@ export type Database = {
           },
         ]
       }
+      driver_locations: {
+        Row: {
+          accuracy: number | null
+          created_at: string
+          driver_id: string
+          id: string
+          lat: number
+          lng: number
+          recorded_at: string
+          route_id: string | null
+        }
+        Insert: {
+          accuracy?: number | null
+          created_at?: string
+          driver_id: string
+          id?: string
+          lat: number
+          lng: number
+          recorded_at?: string
+          route_id?: string | null
+        }
+        Update: {
+          accuracy?: number | null
+          created_at?: string
+          driver_id?: string
+          id?: string
+          lat?: number
+          lng?: number
+          recorded_at?: string
+          route_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_locations_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expenses: {
         Row: {
           amount: number
@@ -520,6 +935,7 @@ export type Database = {
         Row: {
           amount: number
           branch_id: string
+          carried_over: boolean
           created_at: string
           customer_id: string
           delivery_id: string | null
@@ -535,6 +951,7 @@ export type Database = {
         Insert: {
           amount: number
           branch_id: string
+          carried_over?: boolean
           created_at?: string
           customer_id: string
           delivery_id?: string | null
@@ -550,6 +967,7 @@ export type Database = {
         Update: {
           amount?: number
           branch_id?: string
+          carried_over?: boolean
           created_at?: string
           customer_id?: string
           delivery_id?: string | null
@@ -603,10 +1021,13 @@ export type Database = {
       products: {
         Row: {
           allow_returns: boolean
+          bodega_category: string | null
+          bodega_id: string | null
           created_at: string
           display_order: number
           id: string
           is_active: boolean
+          is_bodega_supply: boolean
           name: string
           price: number
           unit: string
@@ -614,10 +1035,13 @@ export type Database = {
         }
         Insert: {
           allow_returns?: boolean
+          bodega_category?: string | null
+          bodega_id?: string | null
           created_at?: string
           display_order?: number
           id?: string
           is_active?: boolean
+          is_bodega_supply?: boolean
           name: string
           price?: number
           unit?: string
@@ -625,16 +1049,27 @@ export type Database = {
         }
         Update: {
           allow_returns?: boolean
+          bodega_category?: string | null
+          bodega_id?: string | null
           created_at?: string
           display_order?: number
           id?: string
           is_active?: boolean
+          is_bodega_supply?: boolean
           name?: string
           price?: number
           unit?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "products_bodega_id_fkey"
+            columns: ["bodega_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -718,6 +1153,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          route_mode: Database["public"]["Enums"]["route_mode"]
           updated_at: string
         }
         Insert: {
@@ -727,6 +1163,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          route_mode?: Database["public"]["Enums"]["route_mode"]
           updated_at?: string
         }
         Update: {
@@ -736,6 +1173,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          route_mode?: Database["public"]["Enums"]["route_mode"]
           updated_at?: string
         }
         Relationships: [
@@ -836,6 +1274,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      carry_over_pending_balance: {
+        Args: { p_branch_id: string; p_date: string }
+        Returns: undefined
+      }
       current_branch_id: { Args: never; Returns: string }
       get_price_for: {
         Args: { _customer_id: string; _product_id: string }
@@ -850,10 +1292,17 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "owner" | "supervisor" | "cashier" | "driver"
+      app_role: "owner" | "supervisor" | "cashier" | "driver" | "transfer_driver"
+      branch_receipt_status: "received" | "incomplete"
+      supply_correction_status: "pending" | "delivered"
+      customer_category: "retail" | "hotel" | "restaurant"
+      delivery_failure_reason: "closed" | "no_order" | "other"
       delivery_status: "pending" | "delivered" | "failed"
+      order_status: "confirmed" | "delivered" | "failed" | "cancelled"
       payment_method: "cash" | "transfer" | "credit" | "other"
       payment_status: "paid" | "pending"
+      route_mode: "dispatch" | "preorder"
+      supply_order_status: "pending" | "confirmed" | "cancelled" | "delivered"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -981,10 +1430,17 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["owner", "supervisor", "cashier", "driver"],
+      app_role: ["owner", "supervisor", "cashier", "driver", "transfer_driver"],
+      branch_receipt_status: ["received", "incomplete"],
+      supply_correction_status: ["pending", "delivered"],
+      customer_category: ["retail", "hotel", "restaurant"],
+      delivery_failure_reason: ["closed", "no_order", "other"],
       delivery_status: ["pending", "delivered", "failed"],
+      order_status: ["confirmed", "delivered", "failed", "cancelled"],
       payment_method: ["cash", "transfer", "credit", "other"],
       payment_status: ["paid", "pending"],
+      route_mode: ["dispatch", "preorder"],
+      supply_order_status: ["pending", "confirmed", "cancelled", "delivered"],
     },
   },
 } as const

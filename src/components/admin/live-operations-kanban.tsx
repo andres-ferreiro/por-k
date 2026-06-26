@@ -1,6 +1,6 @@
 import type { getLiveOperations } from "@/lib/api/admin.functions";
 import { fmtMoney } from "@/lib/format";
-import { Badge } from "@/components/ui/badge";
+import { PaymentStatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -8,10 +8,10 @@ type LiveData = Awaited<ReturnType<typeof getLiveOperations>>;
 type Stop = LiveData["stops"][number];
 
 const COLUMNS = [
-  { key: "unvisited" as const, label: "Sin visitar", header: "bg-muted text-muted-foreground", dot: "bg-muted-foreground/50" },
-  { key: "pending" as const, label: "Pendiente", header: "bg-amber-50 text-amber-900", dot: "bg-amber-500" },
-  { key: "delivered" as const, label: "Entregado", header: "bg-emerald-50 text-emerald-900", dot: "bg-emerald-500" },
-  { key: "failed" as const, label: "Fallido", header: "bg-rose-50 text-rose-900", dot: "bg-rose-500" },
+  { key: "unvisited" as const, label: "Sin visitar", header: "border-border bg-muted/50 text-muted-foreground", dot: "bg-muted-foreground/50" },
+  { key: "pending" as const, label: "Pendiente", header: "border-amber-600/40 bg-amber-500/10 text-amber-800", dot: "bg-amber-500" },
+  { key: "delivered" as const, label: "Entregado", header: "border-emerald-600/40 bg-emerald-500/10 text-emerald-800", dot: "bg-emerald-500" },
+  { key: "failed" as const, label: "Fallido", header: "border-red-600/40 bg-red-500/10 text-red-800", dot: "bg-red-500" },
 ];
 
 function StopCard({ stop }: { stop: Stop }) {
@@ -23,9 +23,9 @@ function StopCard({ stop }: { stop: Stop }) {
           <div className="text-xs text-muted-foreground line-clamp-2">{stop.address}</div>
         )}
         <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-          <Badge variant="outline" className="text-[10px] font-normal">
+          <TagBadge className="text-[10px] font-normal normal-case tracking-normal">
             {stop.route_name}
-          </Badge>
+          </TagBadge>
           {stop.driver_name && (
             <span className="text-[10px] text-muted-foreground">{stop.driver_name}</span>
           )}
@@ -34,15 +34,7 @@ function StopCard({ stop }: { stop: Stop }) {
           <div className="text-xs font-semibold tabular-nums text-primary">{fmtMoney(stop.total)}</div>
         )}
         {stop.payment_status && (
-          <Badge
-            variant="outline"
-            className={cn(
-              "text-[10px]",
-              stop.payment_status === "paid" ? "border-emerald-200 text-emerald-700" : "border-amber-200 text-amber-700",
-            )}
-          >
-            {stop.payment_status === "paid" ? "Pagado" : "Pago pendiente"}
-          </Badge>
+          <PaymentStatusBadge status={stop.payment_status} />
         )}
       </CardContent>
     </Card>
@@ -56,7 +48,7 @@ export function LiveOperationsKanban({ data }: { data: LiveData }) {
         const items = data.kanban[col.key];
         return (
           <div key={col.key} className="flex flex-col min-h-0 rounded-xl border bg-card overflow-hidden">
-            <div className={cn("px-3 py-2.5 flex items-center justify-between shrink-0", col.header)}>
+            <div className={cn("px-3 py-2.5 flex items-center justify-between shrink-0 border-b", col.header)}>
               <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
                 <span className={cn("h-2 w-2 rounded-full", col.dot)} />
                 {col.label}

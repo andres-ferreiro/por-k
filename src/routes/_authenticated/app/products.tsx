@@ -24,6 +24,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { BodegaCatalogTab } from "@/components/admin/bodega-catalog-tab";
 
 export const Route = createFileRoute("/_authenticated/app/products")({
   component: ProductsPage,
@@ -60,9 +62,17 @@ function ProductsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Catálogo"
-        description="Productos y precios compartidos por toda la empresa."
-        action={
-          <div className="flex flex-wrap gap-2">
+        description="Productos de venta e insumos de bodega."
+      />
+
+      <Tabs defaultValue="ventas">
+        <TabsList>
+          <TabsTrigger value="ventas">Ventas</TabsTrigger>
+          <TabsTrigger value="bodega">Bodega (Insumos)</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ventas" className="space-y-4 mt-4">
+      <div className="flex flex-wrap gap-2 justify-end">
             <Button
               variant={orderMode ? "default" : "outline"}
               onClick={() => setOrderMode((v) => !v)}
@@ -74,8 +84,6 @@ function ProductsPage() {
               <Icon icon={Add01Icon} className="h-4 w-4 mr-1" /> Nuevo producto
             </Button>
           </div>
-        }
-      />
 
       {!orderMode && (
         <TableToolbar
@@ -129,6 +137,12 @@ function ProductsPage() {
 
       <ProductDialog open={open} onOpenChange={setOpen} editing={editing} />
       <CustomerPricesDialog product={pricesFor} onOpenChange={(o) => !o && setPricesFor(null)} />
+        </TabsContent>
+
+        <TabsContent value="bodega" className="mt-4">
+          <BodegaCatalogTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

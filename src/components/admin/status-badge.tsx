@@ -1,14 +1,14 @@
 import { cn } from "@/lib/utils";
+import {
+  badgeToneClass,
+  correctionStatusTone,
+  deliveryStatusTone,
+  receiptStatusTone,
+  supplyOrderStatusTone,
+  type BadgeTone,
+} from "@/lib/badge-tones";
 
-export type StatusTone = "success" | "warning" | "danger" | "neutral" | "info";
-
-const toneClass: Record<StatusTone, string> = {
-  success: "border-emerald-600/60 text-emerald-700 dark:text-emerald-400",
-  warning: "border-amber-600/60 text-amber-700 dark:text-amber-400",
-  danger: "border-red-600/60 text-red-700 dark:text-red-400",
-  neutral: "border-border text-muted-foreground",
-  info: "border-sky-600/60 text-sky-700 dark:text-sky-400",
-};
+export type { BadgeTone, StatusTone } from "@/lib/badge-tones";
 
 export function StatusBadge({
   children,
@@ -16,20 +16,10 @@ export function StatusBadge({
   className,
 }: {
   children: React.ReactNode;
-  tone?: StatusTone;
+  tone?: BadgeTone;
   className?: string;
 }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium",
-        toneClass[tone],
-        className,
-      )}
-    >
-      {children}
-    </span>
-  );
+  return <span className={badgeToneClass(tone, className)}>{children}</span>;
 }
 
 export function ActiveStatusBadge({
@@ -56,10 +46,66 @@ export function PaymentStatusBadge({ status }: { status: "paid" | "pending" | st
   );
 }
 
-export function DeliveryStatusBadge({ status }: { status: "delivered" | "pending" | "failed" | string }) {
-  const tone: StatusTone =
-    status === "delivered" ? "success" : status === "failed" ? "danger" : "warning";
+export function DeliveryStatusBadge({
+  status,
+}: {
+  status: "delivered" | "pending" | "failed" | string;
+}) {
+  const tone = deliveryStatusTone(status);
   const label =
     status === "delivered" ? "Entregada" : status === "failed" ? "Fallida" : "Pendiente";
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
+}
+
+const SUPPLY_ORDER_LABELS: Record<string, string> = {
+  pending: "Pendiente",
+  confirmed: "Confirmado",
+  delivered: "Entregado",
+  cancelled: "Cancelado",
+};
+
+export function SupplyOrderStatusBadge({ status }: { status: string }) {
+  return (
+    <StatusBadge tone={supplyOrderStatusTone(status)}>
+      {SUPPLY_ORDER_LABELS[status] ?? status}
+    </StatusBadge>
+  );
+}
+
+const RECEIPT_LABELS: Record<string, string> = {
+  received: "Recibido",
+  incomplete: "Incompleto",
+};
+
+export function ReceiptStatusBadge({ status }: { status: string }) {
+  return (
+    <StatusBadge tone={receiptStatusTone(status)}>
+      {RECEIPT_LABELS[status] ?? status}
+    </StatusBadge>
+  );
+}
+
+export function CorrectionStatusBadge({
+  status,
+}: {
+  status: "pending" | "delivered" | string | null | undefined;
+}) {
+  const tone = correctionStatusTone(status);
+  if (!tone) return null;
+  const label = status === "pending" ? "Corrección pendiente" : "Corrección entregada";
+  return <StatusBadge tone={tone}>{label}</StatusBadge>;
+}
+
+export function TagBadge({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={cn(badgeToneClass("neutral", "normal-case tracking-normal"), className)}>
+      {children}
+    </span>
+  );
 }

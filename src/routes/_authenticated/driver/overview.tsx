@@ -14,7 +14,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { listTodayDeliveries, listTodayPayments, listTodayExpenses, getMyRouteToday } from "@/lib/api/driver.functions";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { deliveryStatusTone } from "@/lib/badge-tones";
+import { StatusBadge } from "@/components/admin/status-badge";
 import { useState } from "react";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
 import { fmtMoney } from "@/lib/format";
@@ -26,9 +27,9 @@ export const Route = createFileRoute("/_authenticated/driver/overview")({
 });
 
 const STATUS_META = {
-  delivered: { label: "Entregado", cls: "bg-emerald-100 text-emerald-800 border-emerald-200", icon: CheckmarkCircle02Icon },
-  pending: { label: "Pendiente", cls: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock01Icon },
-  failed: { label: "Fallido", cls: "bg-rose-100 text-rose-800 border-rose-200", icon: CancelCircleIcon },
+  delivered: { label: "Entregado", tone: deliveryStatusTone("delivered"), icon: CheckmarkCircle02Icon },
+  pending: { label: "Pendiente", tone: deliveryStatusTone("pending"), icon: Clock01Icon },
+  failed: { label: "Fallido", tone: deliveryStatusTone("failed"), icon: CancelCircleIcon },
 };
 
 const METHOD_LABEL: Record<string, string> = {
@@ -281,10 +282,10 @@ function Page() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium truncate">{r.customer_name}</span>
-                        <Badge variant="outline" className={`${meta.cls} shrink-0`}>
+                        <StatusBadge tone={meta.tone} className="shrink-0 normal-case tracking-normal">
                           <Icon icon={meta.icon} className="h-3 w-3 mr-1" />
                           {meta.label}
-                        </Badge>
+                        </StatusBadge>
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
                         {r.units > 0 && (

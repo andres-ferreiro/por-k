@@ -31,6 +31,28 @@ function MapBounds({ stops }: { stops: { lat: number; lng: number }[] }) {
   return null;
 }
 
+function DriverMarker({ lat, lng, name }: { lat: number; lng: number; name: string | null }) {
+  return (
+    <AdvancedMarker position={{ lat, lng }}>
+      <div className="flex flex-col items-center">
+        <div
+          className="h-5 w-5 rounded-full bg-blue-600 border-2 border-white shadow-lg flex items-center justify-center"
+          title={name ?? "Repartidor"}
+        >
+          <svg viewBox="0 0 24 24" className="h-3 w-3 fill-white" xmlns="http://www.w3.org/2000/svg">
+            <path d="M17 8C17 5.24 14.76 3 12 3S7 5.24 7 8c0 3.75 5 10 5 10s5-6.25 5-10zm-7 0c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2z"/>
+          </svg>
+        </div>
+        {name && (
+          <span className="mt-0.5 text-[10px] font-semibold text-blue-700 bg-white/90 px-1 rounded shadow whitespace-nowrap">
+            {name}
+          </span>
+        )}
+      </div>
+    </AdvancedMarker>
+  );
+}
+
 function LiveMapInner({ data, routeId }: { data: LiveData; routeId: string | null }) {
   const stopsWithCoords = useMemo(
     () =>
@@ -39,6 +61,23 @@ function LiveMapInner({ data, routeId }: { data: LiveData; routeId: string | nul
       ),
     [data.stops, routeId],
   );
+
+  // Build driver name map from routes
+  const driverNameByDriverId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const r of data.routes) {
+      if (r.driver_id) map.set(r.driver_id, r.driver_name);
+    }
+    return map;
+  }, [data.routes]);
+
+  // Filter driver locations by active routeId filter
+  const driverLocs = useMemo(() => {
+    const locs = data.driver_locations ?? [];
+    if (!routeId) return locs;
+    const driverForRoute = data.routes.find((r) => r.id === routeId)?.driver_id;
+    return driverForRoute ? locs.filter((l) => l.driver_id === driverForRoute) : locs;
+  }, [data.driver_locations, data.routes, routeId]);
 
   const center = stopsWithCoords[0]
     ? { lat: stopsWithCoords[0].lat!, lng: stopsWithCoords[0].lng! }
@@ -64,6 +103,14 @@ function LiveMapInner({ data, routeId }: { data: LiveData; routeId: string | nul
           />
         </AdvancedMarker>
       ))}
+      {driverLocs.map((loc) => (
+        <DriverMarker
+          key={loc.driver_id}
+          lat={loc.lat}
+          lng={loc.lng}
+          name={driverNameByDriverId.get(loc.driver_id) ?? null}
+        />
+      ))}
     </GoogleMap>
   );
 }
@@ -76,6 +123,7 @@ export function LiveOperationsMap({
   routeId: string | null;
 }) {
   const withCoords = data.stops.filter((s) => s.lat != null && s.lng != null);
+  const hasDriverLocs = (data.driver_locations ?? []).length > 0;
 
   if (!API_KEY) {
     return (
@@ -85,7 +133,7 @@ export function LiveOperationsMap({
     );
   }
 
-  if (withCoords.length === 0) {
+  if (withCoords.length === 0 && !hasDriverLocs) {
     return (
       <div className="flex h-[50svh] min-h-[240px] max-h-[480px] items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
         No hay clientes con ubicación guardada.
@@ -100,6 +148,7 @@ export function LiveOperationsMap({
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Pendiente</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Entregado</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-500" /> Fallido</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-600" /> Repartidor</span>
       </div>
       <div className="h-[50svh] min-h-[240px] max-h-[480px] overflow-hidden rounded-xl border">
         <APIProvider apiKey={API_KEY} language="es" region="MX">

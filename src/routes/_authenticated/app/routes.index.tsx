@@ -51,7 +51,7 @@ function RoutesPage() {
   const listB = useServerFn(listBranches);
 
   const { data: ctx } = useQuery({ queryKey: ["myContext"], queryFn: () => ctxFn() });
-  const { data: routes, isLoading } = useQuery({ queryKey: ["routes"], queryFn: () => list() });
+  const { data: routes, isLoading, isError, error } = useQuery({ queryKey: ["routes"], queryFn: () => list() });
   const { data: branches } = useQuery({
     queryKey: ["branches"],
     queryFn: () => listB(),
@@ -130,7 +130,14 @@ function RoutesPage() {
           </TableHeader>
           <TableBody>
             <TableStatusRow colSpan={colSpan} loading={isLoading} />
-            {!isLoading && rows.length === 0 && (
+            {!isLoading && isError && (
+              <TableStatusRow
+                colSpan={colSpan}
+                empty
+                emptyMessage={(error as Error)?.message ?? "No se pudieron cargar las rutas."}
+              />
+            )}
+            {!isLoading && !isError && rows.length === 0 && (
               <TableStatusRow colSpan={colSpan} empty emptyMessage="Aún no hay rutas." />
             )}
             {rows.map((r) => (

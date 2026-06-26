@@ -5,6 +5,7 @@ import {
   ArrowUp01Icon,
   BanknoteIcon,
   CancelCircleIcon,
+  Camera01Icon,
   CheckmarkCircle02Icon,
   Clock01Icon,
   CreditCardIcon,
@@ -26,6 +27,7 @@ import {
   getTodayDeliveryDetail,
   getPhotoViewUrls,
 } from "@/lib/api/driver.functions";
+import { getMyDispatchStock } from "@/lib/api/dispatches.functions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -34,11 +36,12 @@ import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
 type Status = "delivered" | "pending" | "failed";
 type Method = "cash" | "transfer" | "credit" | "other";
 type PayStatus = "paid" | "pending";
+type FailureReason = "closed" | "no_order" | "other";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  customer: { id: string; name: string } | null;
+  customer: { id: string; name: string; pending_balance?: number } | null;
   autoLocationOnSell?: boolean;
 }
 
@@ -61,6 +64,8 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const [status, setStatus] = useState<Status>("delivered");
   const [comment, setComment] = useState("");
   const [photoPath, setPhotoPath] = useState<string | null>(null);
+  const [failureReason, setFailureReason] = useState<FailureReason>("other");
+  const [failurePhotoPath, setFailurePhotoPath] = useState<string | null>(null);
   const [qty, setQty] = useState<Record<string, number>>({});
   const [retQty, setRetQty] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<Method>("cash");
@@ -75,6 +80,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const getProducts = useServerFn(getCustomerPricedProducts);
   const getDetail = useServerFn(getTodayDeliveryDetail);
   const viewUrls = useServerFn(getPhotoViewUrls);
+  const getStock = useServerFn(getMyDispatchStock);
 
   const productsQ = useQuery({
     queryKey: ["driver", "pricedProducts", customer?.id],
@@ -86,6 +92,12 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
     queryFn: () => getDetail({ data: { customer_id: customer!.id } }),
     enabled: open && !!customer,
   });
+  const stockQ = useQuery({
+    queryKey: ["driver", "dispatchStock"],
+    queryFn: () => getStock(),
+    enabled: open,
+    staleTime: 30_000,
+  });
 
   useEffect(() => {
     if (!open || !detailQ.data) return;
@@ -94,11 +106,15 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
       setStatus(d.delivery.status as Status);
       setComment(d.delivery.comment ?? "");
       setPhotoPath(d.delivery.photo_url ?? null);
+      setFailureReason((d.delivery.failure_reason as FailureReason) ?? "other");
+      setFailurePhotoPath(d.delivery.failure_photo_url ?? null);
       if (d.delivery.comment || d.delivery.photo_url) setShowNotes(true);
     } else {
       setStatus("delivered");
       setComment("");
       setPhotoPath(null);
+      setFailureReason("other");
+      setFailurePhotoPath(null);
       setShowNotes(false);
     }
     setQty(Object.fromEntries(d.items.map((i: any) => [i.product_id, i.quantity])));
@@ -122,6 +138,11 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const products = productsQ.data ?? [];
   const returnableProducts = useMemo(() => products.filter((p) => p.allow_returns), [products]);
 
+  const stockMap = stockQ.data?.stock ?? {};
+  const hasDispatch = stockQ.data?.dispatch_id != null;
+  const totalRemainingStock = stockQ.data?.total_units ?? null;
+  const outOfStock = hasDispatch && totalRemainingStock === 0;
+
   const total = useMemo(
     () =>
       products.reduce((s, p) => {
@@ -134,7 +155,11 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const sellCount = useMemo(() => Object.values(qty).filter((q) => q > 0).length, [qty]);
   const retCount = useMemo(() => Object.values(retQty).filter((q) => q > 0).length, [retQty]);
 
-  const setQtyVal = (id: string, val: number) => setQty((s) => ({ ...s, [id]: Math.max(0, val) }));
+  const setQtyVal = (id: string, val: number) => {
+    const cap = stockMap[id];
+    const max = hasDispatch && cap !== undefined ? cap : Infinity;
+    setQty((s) => ({ ...s, [id]: Math.min(Math.max(0, val), max) }));
+  };
   const setRetQtyVal = (id: string, val: number) => setRetQty((s) => ({ ...s, [id]: Math.max(0, val) }));
 
   const mut = useMutation({
@@ -162,6 +187,8 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           status,
           comment: comment.trim() || null,
           photo_path: photoPath,
+          failure_reason: status === "failed" ? failureReason : null,
+          failure_photo_path: status === "failed" ? failurePhotoPath : null,
           items: status === "delivered" ? items : [],
           returns,
           payment: { method, status: payStatus },
@@ -179,6 +206,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
   if (!customer) return null;
   const isDelivered = status === "delivered";
+  const pendingBalance = customer.pending_balance ?? 0;
 
   return (
     <>
@@ -252,9 +280,17 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                   {!productsQ.isLoading && products.length === 0 && (
                     <p className="text-sm text-muted-foreground py-6 text-center">No hay productos activos.</p>
                   )}
+                  {outOfStock && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/20 dark:border-rose-800 px-3 py-2.5 text-sm font-medium text-rose-700 dark:text-rose-400 text-center">
+                      Sin producto disponible — ya vendiste todo lo cargado hoy.
+                    </div>
+                  )}
                   {products.map((p) => {
                     const q = qty[p.id] ?? 0;
                     const subtotal = q * p.effective_price;
+                    const cap = stockMap[p.id];
+                    const hasCap = hasDispatch && cap !== undefined;
+                    const atMax = hasCap && q >= cap;
                     return (
                       <div
                         key={p.id}
@@ -268,6 +304,11 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                           <div className="text-xs text-muted-foreground tabular-nums">
                             {fmt(p.effective_price)} / {p.unit}
                             {q > 0 && <span className="ml-2 font-semibold text-foreground">= {fmt(subtotal)}</span>}
+                            {hasCap && (
+                              <span className={`ml-2 ${cap === 0 ? "text-rose-500" : "text-muted-foreground"}`}>
+                                · {cap - q >= 0 ? cap - q : 0} dispon.
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
@@ -294,6 +335,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                             variant="outline"
                             className="h-9 w-9 shrink-0"
                             onClick={() => setQtyVal(p.id, q + 1)}
+                            disabled={atMax}
                           >
                             <Icon icon={Add01Icon} className="h-4 w-4" />
                           </Button>
@@ -451,20 +493,68 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
             </Tabs>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pt-3 pb-2">
-              <div className="py-4 text-center text-sm text-muted-foreground rounded-lg border border-dashed">
-                {status === "pending"
-                  ? "Visita marcada como pendiente. No se registrarán productos vendidos."
-                  : "Visita marcada como fallida. No se registrarán productos vendidos."}
-              </div>
+              {status === "pending" ? (
+                <div className="py-4 text-center text-sm text-muted-foreground rounded-lg border border-dashed">
+                  Visita marcada como pendiente. No se registrarán productos vendidos.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="py-3 text-center text-sm text-muted-foreground rounded-lg border border-dashed">
+                    Visita marcada como fallida. No se registrarán productos vendidos.
+                  </div>
+                  {/* Failure reason */}
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Razón</label>
+                    <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-muted">
+                      {(["closed", "no_order", "other"] as FailureReason[]).map((r) => {
+                        const labels: Record<FailureReason, string> = { closed: "Cerrada", no_order: "Sin pedido", other: "Otra" };
+                        return (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setFailureReason(r)}
+                            className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                              failureReason === r ? "bg-rose-600 text-white" : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {labels[r]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Mandatory camera photo when closed */}
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium flex items-center gap-1.5">
+                      <Icon icon={Camera01Icon} className="h-4 w-4" />
+                      {failureReason === "closed" ? "Foto de la tienda cerrada (obligatoria)" : "Foto (opcional)"}
+                    </label>
+                    <PhotoCapture
+                      bucket="delivery-photos"
+                      value={failurePhotoPath}
+                      onChange={setFailurePhotoPath}
+                    />
+                    {failureReason === "closed" && !failurePhotoPath && (
+                      <p className="text-xs text-rose-500">Debes tomar una foto para confirmar que la tienda está cerrada.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* Fixed bottom bar */}
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
+            {pendingBalance > 0 && (
+              <div className="flex items-center justify-between mb-2 px-1 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800">
+                <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo anterior</span>
+                <span className="text-sm font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmt(pendingBalance)}</span>
+              </div>
+            )}
             {isDelivered && total > 0 && (
               <div className="flex items-center justify-between mb-2.5 px-1">
                 <span className="text-sm text-muted-foreground">Total a cobrar</span>
-                <span className="text-xl font-bold tabular-nums text-primary">{fmt(total)}</span>
+                <span className="text-xl font-bold tabular-nums text-primary">{fmt(total + pendingBalance)}</span>
               </div>
             )}
             <div className="flex gap-2">
@@ -479,7 +569,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
               <Button
                 className="flex-2 flex-[2] h-12 font-semibold"
                 onClick={() => mut.mutate()}
-                disabled={mut.isPending}
+                disabled={mut.isPending || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
               >
                 {mut.isPending ? "Guardando…" : "Guardar"}
               </Button>

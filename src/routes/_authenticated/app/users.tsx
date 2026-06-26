@@ -55,7 +55,7 @@ export const Route = createFileRoute("/_authenticated/app/users")({
 });
 
 const ROLE_LABEL: Record<string, string> = {
-  owner: "Propietario", supervisor: "Supervisor", cashier: "Cajero", driver: "Repartidor",
+  owner: "Propietario", supervisor: "Supervisor", cashier: "Cajero", driver: "Repartidor", transfer_driver: "Abastecimiento",
 };
 
 interface User {
@@ -116,6 +116,7 @@ function UsersPage() {
               <SelectItem value="supervisor">Supervisor</SelectItem>
               <SelectItem value="cashier">Cajero</SelectItem>
               <SelectItem value="driver">Repartidor</SelectItem>
+              <SelectItem value="transfer_driver">Abastecimiento</SelectItem>
             </FilterSelect>
             <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
           </>
@@ -246,6 +247,7 @@ function UserDialog({ open, onOpenChange, editing, branches }: {
                 <SelectItem value="supervisor">Supervisor</SelectItem>
                 <SelectItem value="cashier">Cajero</SelectItem>
                 <SelectItem value="driver">Repartidor</SelectItem>
+              <SelectItem value="transfer_driver">Abastecimiento</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
-const roleEnum = z.enum(["owner", "supervisor", "cashier", "driver"]);
+const roleEnum = z.enum(["owner", "supervisor", "cashier", "driver", "transfer_driver"]);
 
 async function requireOwner(supabase: any, userId: string) {
   const { data, error } = await supabase

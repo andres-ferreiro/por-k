@@ -8,6 +8,7 @@ export const listProducts = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("products")
       .select("*")
+      .eq("is_bodega_supply", false)
       .order("display_order", { ascending: true })
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -50,7 +51,7 @@ export const createProduct = createServerFn({ method: "POST" })
     const display_order = (last?.display_order ?? -1) + 1;
     const { data: row, error } = await context.supabase
       .from("products")
-      .insert({ ...data, display_order })
+      .insert({ ...data, display_order, is_bodega_supply: false })
       .select()
       .single();
     if (error) throw new Error(error.message);
@@ -136,4 +137,188 @@ export const deleteCustomerPrice = createServerFn({ method: "POST" })
       .eq("customer_id", data.customer_id);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// ============ BODEGA SUPPLY PRODUCTS ============
+
+const bodegaProductInput = z.object({
+  name: z.string().min(1).max(120),
+  unit: z.string().min(1).max(80),
+  bodega_category: z.string().min(1).max(80),
+  bodega_id: z.string().uuid(),
+  is_active: z.boolean().optional(),
+});
+
+export const listBodegaSupplyProducts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ bodega_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
+    let q = context.supabase
+      .from("products")
+      .select("id, name, unit, bodega_category, is_active, created_at, bodega_id, bodega:branches!products_bodega_id_fkey(name, bodega_display_name)")
+      .eq("is_bodega_supply", true)
+      .order("bodega_category", { ascending: true })
+      .order("name", { ascending: true });
+    if (data.bodega_id) q = q.eq("bodega_id", data.bodega_id);
+    const { data: rows, error } = await q;
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((p: any) => ({
+      ...p,
+      bodega_name: p.bodega?.bodega_display_name?.trim() || p.bodega?.name || null,
+    }));
+  });
+
+export const createBodegaProduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => bodegaProductInput.parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: bodega, error: bErr } = await context.supabase
+      .from("branches")
+      .select("id, is_bodega")
+      .eq("id", data.bodega_id)
+      .maybeSingle();
+    if (bErr) throw new Error(bErr.message);
+    if (!bodega?.is_bodega) throw new Error("La bodega seleccionada no es válida.");
+
+    const { data: row, error } = await context.supabase
+      .from("products")
+      .insert({
+        name: data.name.trim(),
+        unit: data.unit.trim(),
+        bodega_category: data.bodega_category.trim(),
+        bodega_id: data.bodega_id,
+        is_bodega_supply: true,
+        is_active: data.is_active ?? true,
+        price: 0,
+        allow_returns: false,
+        display_order: 0,
+      })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const updateBodegaProduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid() }).merge(bodegaProductInput.partial()).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { id, bodega_id, ...patch } = data;
+
+    if (bodega_id) {
+      const { data: bodega, error: bErr } = await context.supabase
+        .from("branches")
+        .select("id, is_bodega")
+        .eq("id", bodega_id)
+        .maybeSingle();
+      if (bErr) throw new Error(bErr.message);
+      if (!bodega?.is_bodega) throw new Error("La bodega seleccionada no es válida.");
+    }
+
+    const { data: row, error } = await context.supabase
+      .from("products")
+      .update({ ...patch, ...(bodega_id ? { bodega_id } : {}) })
+      .eq("id", id)
+      .eq("is_bodega_supply", true)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const deleteBodegaProduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: product, error: pErr } = await context.supabase
+      .from("products")
+      .select("id, name")
+      .eq("id", data.id)
+      .eq("is_bodega_supply", true)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!product) throw new Error("Producto no encontrado.");
+
+    const { count, error: cErr } = await context.supabase
+      .from("branch_supply_order_items")
+      .select("id", { count: "exact", head: true })
+      .eq("product_id", data.id);
+    if (cErr) throw new Error(cErr.message);
+    if ((count ?? 0) > 0) {
+      throw new Error("No se puede eliminar: el producto aparece en pedidos de bodega existentes.");
+    }
+
+    const { error } = await context.supabase
+      .from("products")
+      .delete()
+      .eq("id", data.id)
+      .eq("is_bodega_supply", true);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+const bulkBodegaRowSchema = z.object({
+  name: z.string().min(1).max(120),
+  unit: z.string().min(1).max(80),
+  categoria: z.string().min(1).max(80),
+});
+
+export const bulkUpsertBodegaProducts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        bodega_id: z.string().uuid(),
+        rows: z.array(bulkBodegaRowSchema).min(1).max(500),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    let created = 0;
+    let updated = 0;
+
+    for (const row of data.rows) {
+      const name = row.name.trim();
+      const unit = row.unit.trim();
+      const bodega_category = row.categoria.trim();
+
+      const { data: existing } = await supabaseAdmin
+        .from("products")
+        .select("id")
+        .eq("is_bodega_supply", true)
+        .eq("bodega_id", data.bodega_id)
+        .ilike("name", name)
+        .ilike("bodega_category", bodega_category)
+        .maybeSingle();
+
+      if (existing?.id) {
+        const { error } = await supabaseAdmin
+          .from("products")
+          .update({ unit, is_active: true })
+          .eq("id", existing.id);
+        if (error) throw new Error(error.message);
+        updated++;
+      } else {
+        const { error } = await supabaseAdmin.from("products").insert({
+          name,
+          unit,
+          bodega_category,
+          bodega_id: data.bodega_id,
+          is_bodega_supply: true,
+          is_active: true,
+          price: 0,
+          allow_returns: false,
+          display_order: 0,
+        });
+        if (error) throw new Error(error.message);
+        created++;
+      }
+    }
+
+    return { created, updated, total: data.rows.length };
   });

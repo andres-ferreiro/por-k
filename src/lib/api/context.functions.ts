@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-export type AppRole = "owner" | "supervisor" | "cashier" | "driver";
+export type AppRole = "owner" | "supervisor" | "cashier" | "driver" | "transfer_driver";
 
 export interface MyContext {
   userId: string;
@@ -28,7 +28,7 @@ export const getMyContext = createServerFn({ method: "GET" })
     ]);
 
     const roles = (rolesData ?? []).map((r) => r.role as AppRole);
-    const order: AppRole[] = ["owner", "supervisor", "cashier", "driver"];
+    const order: AppRole[] = ["owner", "supervisor", "cashier", "driver", "transfer_driver"];
     const primaryRole = order.find((r) => roles.includes(r)) ?? null;
 
     return {

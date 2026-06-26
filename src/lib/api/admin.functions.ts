@@ -510,7 +510,7 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
     let q = context.supabase
       .from("deliveries")
       .select(
-        "id, delivery_date, created_at, status, comment, route_id, driver_id, customer_id, routes(name), customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, method, status, delivery_id)",
+        "id, delivery_date, created_at, status, comment, failure_reason, route_id, driver_id, customer_id, routes(name, route_mode), customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, method, status, delivery_id)",
       )
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to)
@@ -542,8 +542,10 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
         created_at: r.created_at as string,
         status: r.status as "pending" | "delivered" | "failed",
         comment: r.comment as string | null,
+        failure_reason: (r.failure_reason as string | null) ?? null,
         route_id: r.route_id as string,
         route_name: r.routes?.name ?? null,
+        route_mode: (r.routes?.route_mode as string) ?? "dispatch",
         customer_id: r.customer_id as string,
         customer_name: r.customers?.name ?? null,
         driver_id: r.driver_id as string,
@@ -1008,7 +1010,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
 
     let routesQ = supabase
       .from("routes")
-      .select("id, name, driver_id, branch_id")
+      .select("id, name, driver_id, branch_id, route_mode")
       .eq("is_active", true)
       .order("name");
     if (bid) routesQ = routesQ.eq("branch_id", bid);
@@ -1080,6 +1082,21 @@ export const getLiveOperations = createServerFn({ method: "POST" })
     const dispatches = dispatchesRes.data ?? [];
     const dispatchByRoute = new Map(dispatches.map((d: any) => [d.route_id as string, d]));
 
+    const preorderRouteIds = routes.filter((r: any) => r.route_mode === "preorder").map((r: any) => r.id);
+    let ordersByRouteCustomer = new Map<string, any>();
+    if (preorderRouteIds.length > 0) {
+      const { data: orders, error: ordErr } = await supabase
+        .from("customer_orders")
+        .select("route_id, customer_id, status, customer_order_items(quantity, unit_price)")
+        .eq("delivery_date", today)
+        .in("route_id", preorderRouteIds)
+        .neq("status", "cancelled");
+      if (ordErr) throw new Error(ordErr.message);
+      for (const o of orders ?? []) {
+        ordersByRouteCustomer.set(`${(o as any).route_id}:${(o as any).customer_id}`, o);
+      }
+    }
+
     const deliveries = deliveriesRes.data ?? [];
     const deliveryByRouteCustomer = new Map<string, any>();
     for (const d of deliveries) {
@@ -1095,6 +1112,31 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       ].filter(Boolean)),
     ) as string[];
     const names = await fetchProfileNames(driverIds);
+
+    const driverIdsForLocations = Array.from(
+      new Set(routes.map((r: any) => r.driver_id).filter(Boolean)),
+    ) as string[];
+    let driverLocations: Array<{
+      driver_id: string;
+      route_id: string | null;
+      lat: number;
+      lng: number;
+      recorded_at: string;
+    }> = [];
+    if (driverIdsForLocations.length > 0) {
+      const { data: locs, error: locErr } = await supabase
+        .from("driver_locations")
+        .select("driver_id, route_id, lat, lng, recorded_at")
+        .in("driver_id", driverIdsForLocations);
+      if (locErr) throw new Error(locErr.message);
+      driverLocations = (locs ?? []).map((l: any) => ({
+        driver_id: l.driver_id as string,
+        route_id: (l.route_id as string | null) ?? null,
+        lat: Number(l.lat),
+        lng: Number(l.lng),
+        recorded_at: l.recorded_at as string,
+      }));
+    }
 
     type StopRow = {
       route_id: string;
@@ -1121,6 +1163,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       const c = rc.customers;
       if (!c) continue;
       const del = deliveryByRouteCustomer.get(`${rc.route_id}:${rc.customer_id}`);
+      const order = ordersByRouteCustomer.get(`${rc.route_id}:${rc.customer_id}`);
       let status: LiveStopStatus = "unvisited";
       let total = 0;
       let paymentStatus: "paid" | "pending" | null = null;
@@ -1130,6 +1173,10 @@ export const getLiveOperations = createServerFn({ method: "POST" })
         total = totals.netAmount;
         const pay = (del.payments ?? []).find((p: any) => p.delivery_id === del.id) ?? del.payments?.[0];
         paymentStatus = pay?.status ?? null;
+      } else if (order) {
+        status = "pending";
+        const items = (order as any).customer_order_items ?? [];
+        total = items.reduce((s: number, i: any) => s + Number(i.quantity) * Number(i.unit_price), 0);
       }
       stops.push({
         route_id: rc.route_id as string,
@@ -1158,6 +1205,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       const unvisited = routeStops.filter((s) => s.status === "unvisited").length;
       const total = routeStops.length;
       const dispatch = dispatchByRoute.get(r.id);
+      const isPreorder = r.route_mode === "preorder";
       const efficiencyStops: EfficiencyStop[] = routeStops.map((s) => ({
         customer_id: s.customer_id,
         position: s.position,
@@ -1171,9 +1219,11 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       return {
         id: r.id as string,
         name: r.name as string,
+        route_mode: (r.route_mode as string) ?? "dispatch",
+        is_preorder: isPreorder,
         driver_id: (r.driver_id as string | null) ?? null,
         driver_name: r.driver_id ? names.get(r.driver_id as string) ?? null : null,
-        dispatched: !!dispatch,
+        dispatched: isPreorder || !!dispatch,
         dispatched_at: dispatch?.dispatched_at ?? null,
         total_stops: total,
         delivered,
@@ -1314,6 +1364,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
     return {
       date: today,
       fetched_at: new Date().toISOString(),
+      driver_locations: driverLocations,
       summary: {
         active_routes: routes.length,
         dispatched_routes: dispatches.length,
@@ -1503,4 +1554,99 @@ export const getRouteEfficiencyReport = createServerFn({ method: "POST" })
 
     rows.sort((a, b) => b.date.localeCompare(a.date) || a.route_name.localeCompare(b.route_name));
     return rows;
+  });
+
+// ============ RETURNS REPORT ============
+
+export const getReturnsReport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => dateRangeSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const bid = data.branch_id ?? null;
+
+    // Delivery returns (from customers to driver)
+    let drQ = supabase
+      .from("delivery_returns")
+      .select(
+        "id, quantity, delivery_id, product_id, deliveries(delivery_date, route_id, driver_id, customer_id, routes(name), customers(name), branch_id), products(name, unit)",
+      )
+      .gte("deliveries.delivery_date", data.date_from)
+      .lte("deliveries.delivery_date", data.date_to);
+    const { data: drRows, error: drErr } = await drQ;
+    if (drErr) throw new Error(drErr.message);
+
+    // Truck returns (driver returning to branch at end of day)
+    let trQ = supabase
+      .from("truck_returns")
+      .select(
+        "id, quantity, dispatch_id, product_id, returned_at, dispatches(dispatched_at, route_id, driver_id, routes(name), branch_id), products(name, unit)",
+      )
+      .gte("returned_at", data.date_from + "T00:00:00Z")
+      .lte("returned_at", data.date_to + "T23:59:59Z");
+    const { data: trRows, error: trErr } = await trQ;
+    if (trErr) throw new Error(trErr.message);
+
+    // Collect all driver ids for name resolution
+    const allDriverIds = new Set<string>();
+    for (const r of drRows ?? []) {
+      const d = (r as any).deliveries;
+      if (d?.driver_id) allDriverIds.add(d.driver_id);
+    }
+    for (const r of trRows ?? []) {
+      const d = (r as any).dispatches;
+      if (d?.driver_id) allDriverIds.add(d.driver_id);
+    }
+    const names = await fetchProfileNames(Array.from(allDriverIds));
+
+    const deliveryReturns = (drRows ?? [])
+      .filter((r: any) => {
+        const del = r.deliveries;
+        if (!del) return false;
+        if (bid && del.branch_id !== bid) return false;
+        return true;
+      })
+      .map((r: any) => {
+        const del = r.deliveries;
+        return {
+          id: r.id as string,
+          type: "delivery" as const,
+          date: del.delivery_date as string,
+          route_name: del.routes?.name ?? null,
+          driver_name: del.driver_id ? names.get(del.driver_id) ?? null : null,
+          customer_name: del.customers?.name ?? null,
+          product_name: r.products?.name ?? null,
+          unit: r.products?.unit ?? null,
+          quantity: Number(r.quantity),
+        };
+      });
+
+    const truckReturns = (trRows ?? [])
+      .filter((r: any) => {
+        const disp = r.dispatches;
+        if (!disp) return false;
+        if (bid && disp.branch_id !== bid) return false;
+        return true;
+      })
+      .map((r: any) => {
+        const disp = r.dispatches;
+        return {
+          id: r.id as string,
+          type: "truck" as const,
+          date: disp
+            ? new Date(disp.dispatched_at as string).toISOString().slice(0, 10)
+            : (r.returned_at as string).slice(0, 10),
+          route_name: disp?.routes?.name ?? null,
+          driver_name: disp?.driver_id ? names.get(disp.driver_id) ?? null : null,
+          customer_name: null,
+          product_name: r.products?.name ?? null,
+          unit: r.products?.unit ?? null,
+          quantity: Number(r.quantity),
+        };
+      });
+
+    return {
+      delivery_returns: deliveryReturns,
+      truck_returns: truckReturns,
+    };
   });

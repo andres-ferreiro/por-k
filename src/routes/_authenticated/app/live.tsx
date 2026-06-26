@@ -37,7 +37,7 @@ function LiveOperationsPage() {
   const [routeId, setRouteId] = useState<string>("all");
   const fetchLive = useServerFn(getLiveOperations);
 
-  const { data, dataUpdatedAt, isLoading, isFetching } = useQuery({
+  const { data, dataUpdatedAt, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ["admin", "live", branchId, routeId],
     queryFn: () =>
       fetchLive({
@@ -151,7 +151,9 @@ function LiveOperationsPage() {
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5 truncate">
                     {r.driver_name ?? "Sin repartidor"}
-                    {!r.dispatched && " · Sin despacho"}
+                    {(r as any).is_preorder
+                      ? " · Ruta de pedidos"
+                      : !r.dispatched && " · Sin despacho"}
                   </div>
                   <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
                     <div
@@ -219,6 +221,10 @@ function LiveOperationsPage() {
             </TabsContent>
           </Tabs>
         </>
+      ) : isError ? (
+        <div className="py-20 text-center text-sm text-destructive">
+          {(error as Error)?.message ?? "No se pudieron cargar las operaciones en vivo."}
+        </div>
       ) : null}
     </div>
   );

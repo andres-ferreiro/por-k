@@ -1,10 +1,11 @@
 import { Analytics01Icon, Logout01Icon, MapPinIcon, ReceiptTextIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { createFileRoute, Outlet, Link, useRouterState, useNavigate, redirect } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getMyContext } from "@/lib/api/context.functions";
-import { getMyRouteToday } from "@/lib/api/driver.functions";
+import { getMyRouteToday, publishDriverLocation } from "@/lib/api/driver.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { DispatchWaitingCard } from "@/components/driver/dispatch-waiting";
@@ -33,16 +34,61 @@ function DriverShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const fetchRoute = useServerFn(getMyRouteToday);
+  const publishLocation = useServerFn(publishDriverLocation);
+  const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const { data: routeData, isLoading: routeLoading } = useQuery({
     queryKey: ["driver", "myRouteToday"],
     queryFn: () => fetchRoute(),
     refetchInterval: (query) => {
       const d = query.state.data;
-      return d?.route && d?.require_dispatch && !d?.can_work ? 15_000 : false;
+      return d?.dispatch && d.dispatch.require_dispatch && !d.dispatch.can_work ? 15_000 : false;
     },
   });
 
-  const waitingForDispatch = !!routeData?.route && routeData.require_dispatch && !routeData.can_work;
+  // Publish GPS location every 60s when driver can work
+  useEffect(() => {
+    if (!routeData?.can_work) {
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+      }
+      return;
+    }
+    const publish = () => {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          publishLocation({
+            data: {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy ?? null,
+            },
+          }).catch(() => {});
+        },
+        () => {},
+        { enableHighAccuracy: false, timeout: 10_000 },
+      );
+    };
+    publish();
+    locationIntervalRef.current = setInterval(publish, 60_000);
+    return () => {
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+      }
+    };
+  }, [routeData?.can_work, publishLocation]);
+
+  const hasPreorderWork = (routeData?.preorder?.customers ?? []).some(
+    (c) => c.order || c.delivery,
+  );
+  const waitingForDispatch =
+    !!routeData?.dispatch
+    && routeData.dispatch.require_dispatch
+    && !routeData.dispatch.can_work
+    && !hasPreorderWork;
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -70,8 +116,8 @@ function DriverShell() {
             </div>
           ) : waitingForDispatch && pathname === "/driver" ? (
             <DispatchWaitingCard
-              routeName={routeData?.route?.name}
-              branchName={routeData?.route?.branch_name}
+              routeName={routeData?.dispatch?.route?.name}
+              branchName={routeData?.dispatch?.route?.branch_name}
             />
           ) : (
             <Outlet />
