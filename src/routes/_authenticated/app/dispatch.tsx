@@ -26,7 +26,6 @@ import {
 } from "@/lib/api/dispatches.functions";
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { getBranchDispatchGate, setBranchRequireDispatch, getBranchLocationGate, setBranchLocationEnabled } from "@/lib/api/branches.functions";
-import { clearDayMovements } from "@/lib/api/admin.functions";
 import { getMyContext } from "@/lib/api/context.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
@@ -144,7 +143,6 @@ function DispatchPage() {
         </div>
       </div>
 
-      {role === "owner" && <ClearDayMovementsCard date={date} />}
     </div>
   );
 }
@@ -352,103 +350,6 @@ function LocationGateSettings({ role }: { role: string | undefined }) {
   );
 }
 
-function ClearDayMovementsCard({ date: pageDate }: { date: string }) {
-  const qc = useQueryClient();
-  const { branchId } = useBranchScope();
-  const clearFn = useServerFn(clearDayMovements);
-  const [date, setDate] = useState<string>(pageDate);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-
-  useEffect(() => {
-    setDate(pageDate);
-  }, [pageDate]);
-
-  const mut = useMutation({
-    mutationFn: () => clearFn({ data: { date, branch_id: branchId! } }),
-    onSuccess: (result) => {
-      const { payments, deliveries, expenses, dispatches } = result.deleted;
-      toast.success(
-        `Movimientos eliminados: ${dispatches} despachos, ${deliveries} entregas, ${payments} pagos, ${expenses} gastos.`,
-      );
-      setConfirmOpen(false);
-      qc.invalidateQueries({ queryKey: ["dispatches"] });
-      qc.invalidateQueries({ queryKey: ["truck-reconciliation"] });
-      qc.invalidateQueries({ queryKey: ["truck-return"] });
-      qc.invalidateQueries({ queryKey: ["driver"] });
-      qc.invalidateQueries({ queryKey: ["admin"] });
-    },
-    onError: (e: any) => toast.error(e?.message ?? "No se pudo limpiar."),
-  });
-
-  if (!branchId) {
-    return (
-      <Card className="border-dashed">
-        <CardContent className="py-4 text-sm text-muted-foreground">
-          Selecciona una sucursal en el menú superior para limpiar movimientos de prueba.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <>
-      <Card className="border-destructive/30">
-        <CardHeader className="py-3">
-          <CardTitle className="text-base text-destructive">Zona de pruebas</CardTitle>
-          <CardDescription className="text-xs">
-            Elimina movimientos de una fecha sin borrar rutas, clientes ni productos.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-0">
-          <p className="text-sm text-muted-foreground">
-            Fecha seleccionada: <span className="font-medium text-foreground">{date}</span>
-          </p>
-          <Button
-            variant="destructive"
-            onClick={() => setConfirmOpen(true)}
-            disabled={mut.isPending}
-          >
-            <Icon icon={Delete02Icon} className="h-4 w-4 mr-1" />
-            Limpiar movimientos del día
-          </Button>
-        </CardContent>
-      </Card>
-
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Limpiar movimientos del {date}?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <p>
-                  Se eliminarán permanentemente todos los <strong>despachos</strong>,{" "}
-                  <strong>devoluciones de camión</strong>, <strong>entregas</strong>,{" "}
-                  <strong>pagos</strong> y <strong>gastos</strong> de esta sucursal en esa fecha.
-                </p>
-                <p>
-                  No se eliminarán rutas, clientes, productos, usuarios ni configuración de la sucursal.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={mut.isPending}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={mut.isPending}
-              onClick={(e) => {
-                e.preventDefault();
-                mut.mutate();
-              }}
-            >
-              {mut.isPending ? "Eliminando…" : "Sí, limpiar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
-}
 
 function BranchSettingsCollapsible({ role }: { role: string | undefined }) {
   const [open, setOpen] = useState(false);
