@@ -3,6 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
 import { deliveryNetTotals, deliveryPaymentAmount } from "@/lib/delivery-totals";
+import { assertSaleWithinStock, fetchDriverDayStock } from "@/lib/driver-stock";
 
 function todayStr(): string {
   return todayInTZ();
@@ -498,71 +499,24 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
 
     // Validate stock limits when items are being sold
     if (data.status === "delivered" && data.items.length > 0) {
-      const { startISO, endISO } = tzDayRange(today);
-      // Fetch ALL of today's dispatches (handles multiple top-ups per day)
-      const { data: dispatches, error: dispErr } = await supabase
-        .from("dispatches")
-        .select("id, dispatch_items(product_id, quantity)")
+      const { data: existingDel } = await supabase
+        .from("deliveries")
+        .select("id")
         .eq("route_id", route.id)
-        .eq("driver_id", userId)
-        .gte("dispatched_at", startISO)
-        .lt("dispatched_at", endISO)
-        .order("dispatched_at", { ascending: false });
-      if (dispErr) throw new Error(dispErr.message);
-      if (dispatches && dispatches.length > 0) {
-        const loaded: Record<string, number> = {};
-        for (const dispatch of dispatches) {
-          for (const it of (dispatch as any).dispatch_items ?? []) {
-            loaded[it.product_id] = (loaded[it.product_id] ?? 0) + Number(it.quantity);
-          }
-        }
-        // Add cross-branch loads for parity with getMyDispatchStock
-        const { data: crossLoads, error: clErr } = await supabase
-          .from("cross_branch_loads")
-          .select("id, cross_branch_load_items(product_id, quantity)")
-          .eq("driver_id", userId)
-          .gte("created_at", startISO)
-          .lt("created_at", endISO);
-        if (clErr) throw new Error(clErr.message);
-        for (const cl of crossLoads ?? []) {
-          for (const it of (cl as any).cross_branch_load_items ?? []) {
-            loaded[it.product_id] = (loaded[it.product_id] ?? 0) + Number(it.quantity);
-          }
-        }
-        // Find existing delivery for this customer today (to exclude from sold sum on re-save)
-        const { data: existingDel } = await supabase
-          .from("deliveries")
-          .select("id")
-          .eq("route_id", route.id)
-          .eq("customer_id", data.customer_id)
-          .eq("delivery_date", today)
-          .maybeSingle();
-        const excludeId = existingDel?.id ?? null;
-        const { data: soldRows, error: soldErr } = await supabase
-          .from("deliveries")
-          .select("id, delivery_items(product_id, quantity)")
-          .eq("route_id", route.id)
-          .eq("driver_id", userId)
-          .eq("delivery_date", today)
-          .eq("status", "delivered");
-        if (soldErr) throw new Error(soldErr.message);
-        const sold: Record<string, number> = {};
-        for (const del of soldRows ?? []) {
-          if (excludeId && (del as any).id === excludeId) continue;
-          for (const it of (del as any).delivery_items ?? []) {
-            sold[it.product_id] = (sold[it.product_id] ?? 0) + Number(it.quantity);
-          }
-        }
-        for (const item of data.items) {
-          const cap = loaded[item.product_id] ?? 0;
-          if (cap === 0) continue;
-          const remaining = Math.max(0, cap - (sold[item.product_id] ?? 0));
-          if (item.quantity > remaining) {
-            throw new Error(
-              `Stock insuficiente: solo te quedan ${remaining} unidad(es) disponible(s) para ese producto.`,
-            );
-          }
-        }
+        .eq("customer_id", data.customer_id)
+        .eq("delivery_date", today)
+        .maybeSingle();
+      const excludeDeliveryId = (existingDel?.id as string | undefined) ?? null;
+
+      const dayStock = await fetchDriverDayStock(supabase, {
+        routeId: route.id,
+        driverId: userId,
+        date: today,
+        excludeDeliveryId,
+      });
+
+      if (dayStock.dispatch_id != null || Object.keys(dayStock.loaded).length > 0) {
+        assertSaleWithinStock(data.items, dayStock);
       }
     }
 

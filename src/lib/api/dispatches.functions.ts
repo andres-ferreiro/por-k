@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
+import { fetchDriverDayStock } from "@/lib/driver-stock";
 
 async function resolveBranchId(
   supabase: any,
@@ -495,15 +496,17 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     }).sort((a, b) => (a.route_name ?? "").localeCompare(b.route_name ?? ""));
   });
 
-// Returns remaining stock (cargado − vendido hoy) per product for the calling driver's active route/dispatch.
-// Used by the driver app to enforce sell limits.
-export const getMyDispatchStock = createServerFn({ method: "GET" })
+// Returns remaining stock per product for the calling driver's active route today.
+// Used by the driver app to enforce sell limits. Stock = all dispatches + cross-branch − sold + returns.
+export const getMyDispatchStock = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) =>
+    z.object({ exclude_customer_id: z.string().uuid().optional().nullable() }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const today = todayInTZ();
 
-    // Find driver's active route
     const { data: routes, error: rErr } = await supabase
       .from("routes")
       .select("id, branch_id")
@@ -512,76 +515,35 @@ export const getMyDispatchStock = createServerFn({ method: "GET" })
       .order("updated_at", { ascending: false })
       .limit(1);
     if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as any;
-    if (!route) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
+    const route = (routes ?? [])[0] as { id: string; branch_id: string } | undefined;
+    if (!route) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0, has_loaded_stock: false };
 
-    // Find ALL of today's dispatches for this route+driver (there may be multiple top-ups)
-    const { startISO, endISO } = tzDayRange(today);
-    const { data: dispatches, error: dErr } = await supabase
-      .from("dispatches")
-      .select("id, dispatch_items(product_id, quantity)")
-      .eq("route_id", route.id)
-      .eq("driver_id", userId)
-      .gte("dispatched_at", startISO)
-      .lt("dispatched_at", endISO)
-      .order("dispatched_at", { ascending: false });
-    if (dErr) throw new Error(dErr.message);
-    if (!dispatches || dispatches.length === 0) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0 };
-
-    // Use the most recent dispatch id as the reference
-    const latestDispatchId = (dispatches[0] as any).id as string;
-
-    // Build loaded map from ALL today's dispatches (handles multiple top-ups per day)
-    const loaded: Record<string, number> = {};
-    for (const dispatch of dispatches) {
-      for (const item of (dispatch as any).dispatch_items ?? []) {
-        loaded[item.product_id] = (loaded[item.product_id] ?? 0) + Number(item.quantity);
-      }
+    let excludeDeliveryId: string | null = null;
+    if (data.exclude_customer_id) {
+      const { data: existingDel, error: exErr } = await supabase
+        .from("deliveries")
+        .select("id")
+        .eq("route_id", route.id)
+        .eq("customer_id", data.exclude_customer_id)
+        .eq("delivery_date", today)
+        .maybeSingle();
+      if (exErr) throw new Error(exErr.message);
+      excludeDeliveryId = (existingDel?.id as string | undefined) ?? null;
     }
 
-    // Sum already sold today
-    const { data: deliveries, error: delErr } = await supabase
-      .from("deliveries")
-      .select("delivery_items(product_id, quantity)")
-      .eq("route_id", route.id)
-      .eq("driver_id", userId)
-      .eq("delivery_date", today)
-      .eq("status", "delivered");
-    if (delErr) throw new Error(delErr.message);
-
-    const sold: Record<string, number> = {};
-    for (const del of deliveries ?? []) {
-      for (const it of (del as any).delivery_items ?? []) {
-        sold[it.product_id] = (sold[it.product_id] ?? 0) + Number(it.quantity);
-      }
-    }
-
-    // Remaining = loaded − sold (floor at 0)
-    const stock: Record<string, number> = {};
-    for (const [pid, qty] of Object.entries(loaded)) {
-      stock[pid] = Math.max(0, qty - (sold[pid] ?? 0));
-    }
-
-    // Also include any cross-branch loads for this driver today
-    const { data: crossLoads, error: clErr } = await supabase
-      .from("cross_branch_loads")
-      .select("id, cross_branch_load_items(product_id, quantity)")
-      .eq("driver_id", userId)
-      .gte("created_at", startISO)
-      .lt("created_at", endISO);
-    if (clErr) throw new Error(clErr.message);
-    for (const cl of crossLoads ?? []) {
-      for (const it of (cl as any).cross_branch_load_items ?? []) {
-        stock[it.product_id] = (stock[it.product_id] ?? 0) + Number(it.quantity);
-      }
-    }
-
-    const totalUnits = Object.values(stock).reduce((a, b) => a + b, 0);
+    const result = await fetchDriverDayStock(supabase, {
+      routeId: route.id,
+      driverId: userId,
+      date: today,
+      excludeDeliveryId,
+    });
 
     return {
-      dispatch_id: latestDispatchId,
-      stock,
-      total_units: totalUnits,
+      dispatch_id: result.dispatch_id,
+      stock: result.stock,
+      total_units: result.total_units,
+      /** True when the driver has any product load today (dispatch and/or cross-branch). */
+      has_loaded_stock: Object.keys(result.loaded).length > 0,
     };
   });
 

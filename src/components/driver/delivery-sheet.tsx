@@ -93,8 +93,8 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
     enabled: open && !!customer,
   });
   const stockQ = useQuery({
-    queryKey: ["driver", "dispatchStock"],
-    queryFn: () => getStock(),
+    queryKey: ["driver", "dispatchStock", customer?.id],
+    queryFn: () => getStock({ data: { exclude_customer_id: customer?.id ?? null } }),
     enabled: open,
     staleTime: 30_000,
   });
@@ -139,9 +139,9 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const returnableProducts = useMemo(() => products.filter((p) => p.allow_returns), [products]);
 
   const stockMap = stockQ.data?.stock ?? {};
-  const hasDispatch = stockQ.data?.dispatch_id != null;
+  const tracksStock = stockQ.data?.has_loaded_stock ?? false;
   const totalRemainingStock = stockQ.data?.total_units ?? null;
-  const outOfStock = hasDispatch && totalRemainingStock === 0;
+  const outOfStock = tracksStock && totalRemainingStock === 0;
 
   const total = useMemo(
     () =>
@@ -157,7 +157,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
   const setQtyVal = (id: string, val: number) => {
     const cap = stockMap[id];
-    const max = hasDispatch && cap !== undefined ? cap : Infinity;
+    const max = tracksStock && cap !== undefined ? cap : Infinity;
     setQty((s) => ({ ...s, [id]: Math.min(Math.max(0, val), max) }));
   };
   const setRetQtyVal = (id: string, val: number) => setRetQty((s) => ({ ...s, [id]: Math.max(0, val) }));
@@ -289,7 +289,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                     const q = qty[p.id] ?? 0;
                     const subtotal = q * p.effective_price;
                     const cap = stockMap[p.id];
-                    const hasCap = hasDispatch && cap !== undefined;
+                    const hasCap = tracksStock && cap !== undefined;
                     const atMax = hasCap && q >= cap;
                     return (
                       <div

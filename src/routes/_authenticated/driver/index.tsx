@@ -147,10 +147,11 @@ function DispatchRoutePage({ data }: {
   const getStock = useServerFn(getMyDispatchStock);
   const stockQ = useQuery({
     queryKey: ["driver", "dispatchStock"],
-    queryFn: () => getStock(),
+    queryFn: () => getStock({ data: {} }),
     staleTime: 30_000,
   });
-  const outOfStock = stockQ.data?.dispatch_id != null && (stockQ.data?.total_units ?? 1) === 0;
+  const outOfStock =
+    (stockQ.data?.has_loaded_stock ?? false) && (stockQ.data?.total_units ?? 1) === 0;
   const [deliveryFor, setDeliveryFor] = useState<Customer | null>(null);
   const [locationFor, setLocationFor] = useState<Customer | null>(null);
   const [search, setSearch] = useState("");
