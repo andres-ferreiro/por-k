@@ -18,8 +18,8 @@ import {
   listDispatchesToday,
   getDispatch,
   getTruckReconciliation,
-  getTruckReturnForDispatch,
-  registerTruckReturn,
+  getTruckReturnForRouteDay,
+  registerTruckReturnForRouteDay,
   createCrossBranchLoad,
   listCrossBranchLoadsToday,
   listExternalDrivers,
@@ -48,6 +48,7 @@ import { toast } from "sonner";
 import { fmtQty } from "@/lib/format";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -78,6 +79,130 @@ interface ReturnRow {
   quantity: string;
 }
 
+interface RouteGroup {
+  key: string;
+  route_id: string;
+  driver_id: string;
+  route_name: string | null;
+  driver_name: string | null;
+  dispatch_count: number;
+  total_units: number;
+}
+
+interface DispatchSummaryItem {
+  id: string;
+  dispatched_at: string;
+  line_count: number;
+  total_units: number;
+}
+
+interface RouteGroupWithDispatches extends RouteGroup {
+  total_lines: number;
+  dispatches: DispatchSummaryItem[];
+}
+
+function buildRouteGroups(
+  dispatches: {
+    route_id: string;
+    driver_id: string;
+    route_name: string | null;
+    driver_name: string | null;
+    total_units: number;
+  }[],
+): RouteGroup[] {
+  const map = new Map<string, RouteGroup>();
+  for (const d of dispatches) {
+    const key = `${d.route_id}::${d.driver_id}`;
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        key,
+        route_id: d.route_id,
+        driver_id: d.driver_id,
+        route_name: d.route_name,
+        driver_name: d.driver_name,
+        dispatch_count: 0,
+        total_units: 0,
+      };
+      map.set(key, group);
+    }
+    group.dispatch_count += 1;
+    group.total_units += d.total_units;
+    if (!group.route_name && d.route_name) group.route_name = d.route_name;
+    if (!group.driver_name && d.driver_name) group.driver_name = d.driver_name;
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    (a.route_name ?? "").localeCompare(b.route_name ?? ""),
+  );
+}
+
+function buildRouteGroupsWithDispatches(
+  dispatches: {
+    id: string;
+    dispatched_at: string;
+    route_id: string;
+    driver_id: string;
+    route_name: string | null;
+    driver_name: string | null;
+    line_count: number;
+    total_units: number;
+  }[],
+): RouteGroupWithDispatches[] {
+  const map = new Map<string, RouteGroupWithDispatches>();
+  for (const d of dispatches) {
+    const key = `${d.route_id}::${d.driver_id}`;
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        key,
+        route_id: d.route_id,
+        driver_id: d.driver_id,
+        route_name: d.route_name,
+        driver_name: d.driver_name,
+        dispatch_count: 0,
+        total_units: 0,
+        total_lines: 0,
+        dispatches: [],
+      };
+      map.set(key, group);
+    }
+    group.dispatch_count += 1;
+    group.total_units += d.total_units;
+    group.total_lines += d.line_count;
+    if (!group.route_name && d.route_name) group.route_name = d.route_name;
+    if (!group.driver_name && d.driver_name) group.driver_name = d.driver_name;
+    group.dispatches.push({
+      id: d.id,
+      dispatched_at: d.dispatched_at,
+      line_count: d.line_count,
+      total_units: d.total_units,
+    });
+  }
+  for (const group of map.values()) {
+    group.dispatches.sort((a, b) => b.dispatched_at.localeCompare(a.dispatched_at));
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    (a.route_name ?? "").localeCompare(b.route_name ?? ""),
+  );
+}
+
+function formatDispatchTimeRange(first: string | null, last: string | null) {
+  if (!first || !last) return "";
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString(APP_LOCALE, {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: APP_TZ,
+    });
+  const start = fmt(first);
+  const end = fmt(last);
+  return start === end ? start : `${start} – ${end}`;
+}
+
+function routeGroupLabel(group: RouteGroup) {
+  return `${group.route_name ?? "Ruta"} · ${group.driver_name ?? "—"}`;
+}
+
 function todayStr() {
   return todayInTZ();
 }
@@ -100,41 +225,43 @@ function DispatchPage() {
   }
 
   return (
-    <div className="space-y-4 pb-6">
-      <PageHeader
-        title="Despacho"
-        description="Carga, devolución y reconciliación del camión."
-        action={
-          <FilterDatePicker
-            value={date}
-            onChange={(v) => setDate(v || todayStr())}
-          />
-        }
-      />
+    <div className="space-y-4 pb-6 xl:space-y-0 xl:flex xl:flex-col xl:gap-4 xl:pb-0 xl:h-[calc(100svh-8.5rem)] xl:overflow-hidden">
+      <div className="shrink-0 space-y-4">
+        <PageHeader
+          title="Despacho"
+          description="Carga, regreso y reconciliación del camión."
+          action={
+            <FilterDatePicker
+              value={date}
+              onChange={(v) => setDate(v || todayStr())}
+            />
+          }
+        />
 
-      {(role === "owner" || role === "supervisor") && (
-        <BranchSettingsCollapsible role={role} />
-      )}
+        {(role === "owner" || role === "supervisor") && (
+          <BranchSettingsCollapsible role={role} />
+        )}
 
-      <DispatchDayStats date={date} />
+        <DispatchDayStats date={date} />
+      </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5 xl:items-start">
-        <div className="xl:col-span-2">
-          <DispatchFormsCard />
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5 xl:flex-1 xl:min-h-0 xl:gap-4">
+        <div className="xl:col-span-2 xl:min-h-0 xl:flex xl:flex-col">
+          <DispatchFormsCard className="xl:flex-1 xl:min-h-0" />
         </div>
-        <div className="xl:col-span-3 space-y-4">
-          <DailySummaryCard date={date} />
-          <Card>
-            <CardContent className="pt-4">
-              <Tabs defaultValue="return" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="return">Devolución de camión</TabsTrigger>
+        <div className="xl:col-span-3 xl:min-h-0 xl:flex xl:flex-col xl:gap-4">
+          <DailySummaryCard date={date} className="xl:max-h-[min(38%,280px)] xl:shrink-0" />
+          <Card className="xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
+            <CardContent className="pt-4 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
+              <Tabs defaultValue="return" className="w-full xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
+                <TabsList className="grid w-full grid-cols-2 shrink-0">
+                  <TabsTrigger value="return">Regreso</TabsTrigger>
                   <TabsTrigger value="reconciliation">Reconciliación</TabsTrigger>
                 </TabsList>
-                <TabsContent value="return" className="mt-3">
-                  <TruckReturnCard date={date} />
+                <TabsContent value="return" className="mt-3 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
+                  <RouteReturnCard date={date} />
                 </TabsContent>
-                <TabsContent value="reconciliation" className="mt-3">
+                <TabsContent value="reconciliation" className="mt-3 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                   <ReconciliationCard date={date} />
                 </TabsContent>
               </Tabs>
@@ -142,7 +269,6 @@ function DispatchPage() {
           </Card>
         </div>
       </div>
-
     </div>
   );
 }
@@ -193,7 +319,7 @@ function DispatchDayStats({ date }: { date: string }) {
       />
       <StatCardSimple label="Vendido" value={hasReconciliation ? truckStats.sold : 0} />
       <StatCardSimple
-        label="Dev. camión"
+        label="Regreso"
         value={hasReconciliation ? truckStats.actual_returned : 0}
         highlight={hasReconciliation && truckStats.difference !== 0}
         sub={
@@ -201,7 +327,7 @@ function DispatchDayStats({ date }: { date: string }) {
             ? undefined
             : truckStats.difference !== 0
               ? `${fmtQty(Math.abs(truckStats.difference))} vs calculado`
-              : "Coincide con calculado"
+              : "Cuadra con calculado"
         }
         badge={
           hasReconciliation && truckStats.difference !== 0
@@ -376,10 +502,10 @@ function BranchSettingsCollapsible({ role }: { role: string | undefined }) {
   );
 }
 
-function DispatchFormsCard() {
+function DispatchFormsCard({ className }: { className?: string }) {
   return (
-    <Card className="relative overflow-visible">
-      <CardHeader className="py-3 pb-0">
+    <Card className={cn("relative overflow-visible xl:overflow-hidden xl:flex xl:flex-col xl:min-h-0", className)}>
+      <CardHeader className="py-3 pb-0 shrink-0">
         <div className="flex items-center gap-2">
           <Icon icon={TruckDeliveryIcon} className="h-5 w-5 text-primary" />
           <CardTitle className="text-base">Registrar carga</CardTitle>
@@ -388,16 +514,16 @@ function DispatchFormsCard() {
           Despacho de ruta o entrega a repartidor de otra sucursal.
         </CardDescription>
       </CardHeader>
-      <CardContent className="pt-3">
-        <Tabs defaultValue="route">
-          <TabsList className="grid w-full grid-cols-2">
+      <CardContent className="pt-3 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col xl:overflow-hidden">
+        <Tabs defaultValue="route" className="xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
+          <TabsList className="grid w-full grid-cols-2 shrink-0">
             <TabsTrigger value="route">Despacho de ruta</TabsTrigger>
             <TabsTrigger value="external">Carga externa</TabsTrigger>
           </TabsList>
-          <TabsContent value="route" className="mt-3">
+          <TabsContent value="route" className="mt-3 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
             <NewDispatchForm />
           </TabsContent>
-          <TabsContent value="external" className="mt-3">
+          <TabsContent value="external" className="mt-3 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
             <CrossBranchLoadForm />
           </TabsContent>
         </Tabs>
@@ -662,7 +788,7 @@ function NewDispatchForm() {
           </div>
 
           {showAllProducts ? (
-            <div className="space-y-1 max-h-[320px] overflow-y-auto rounded-lg border p-1.5">
+            <div className="space-y-1 max-h-[320px] overflow-y-auto rounded-lg border p-1.5 xl:max-h-none xl:min-h-[120px]">
               {(products ?? []).length === 0 && (
                 <p className="text-sm text-muted-foreground py-4 text-center">No hay productos activos.</p>
               )}
@@ -770,7 +896,7 @@ function NewDispatchForm() {
   );
 }
 
-function DailySummaryCard({ date }: { date: string }) {
+function DailySummaryCard({ date, className }: { date: string; className?: string }) {
   const { branchId } = useBranchScope();
   const listFn = useServerFn(listDispatchesToday);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -780,41 +906,107 @@ function DailySummaryCard({ date }: { date: string }) {
     queryFn: () => listFn({ data: { date, branch_id: branchId } }),
   });
 
+  const routeGroups = useMemo(() => buildRouteGroupsWithDispatches(list ?? []), [list]);
+  const singleGroup = routeGroups.length === 1;
+
+  const branchTotals = useMemo(
+    () =>
+      routeGroups.reduce(
+        (acc, g) => ({
+          dispatches: acc.dispatches + g.dispatch_count,
+          lines: acc.lines + g.total_lines,
+          units: acc.units + g.total_units,
+        }),
+        { dispatches: 0, lines: 0, units: 0 },
+      ),
+    [routeGroups],
+  );
+
   return (
-    <Card className="relative overflow-visible">
-      <CardHeader className="py-3">
-        <CardTitle className="text-base">Despachos del día</CardTitle>
+    <Card className={cn("relative overflow-visible xl:flex xl:flex-col xl:min-h-0", className)}>
+      <CardHeader className="py-3 shrink-0">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="text-base">Despachos del día</CardTitle>
+          {!isLoading && routeGroups.length > 0 && (
+            <div className="text-xs tabular-nums text-muted-foreground text-right shrink-0">
+              {routeGroups.length} {routeGroups.length === 1 ? "ruta" : "rutas"} ·{" "}
+              {fmtQty(branchTotals.units)} u
+            </div>
+          )}
+        </div>
       </CardHeader>
-      <CardContent className="space-y-2 pt-0">
-        <div className="space-y-1.5 max-h-[280px] overflow-y-auto">
+      <CardContent className="space-y-2 pt-0 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col xl:overflow-hidden">
+        <div className="space-y-2 max-h-[360px] overflow-y-auto xl:max-h-none xl:flex-1 xl:min-h-0">
           {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-          {!isLoading && (list?.length ?? 0) === 0 && (
+          {!isLoading && routeGroups.length === 0 && (
             <p className="text-sm text-muted-foreground">Sin despachos en esta fecha.</p>
           )}
-          {(list ?? []).map((r) => {
-            const time = new Date(r.dispatched_at).toLocaleTimeString(APP_LOCALE, {
-              hour: "2-digit",
-              minute: "2-digit",
-              timeZone: APP_TZ,
-            });
-            return (
-              <div
-                key={r.id}
-                className="flex items-center gap-2 rounded-md border px-2.5 py-2"
-              >
-                <div className="w-12 shrink-0 text-xs font-medium tabular-nums">{time}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{r.route_name ?? "Ruta"}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {r.driver_name ?? "—"} · {r.line_count} {r.line_count === 1 ? "línea" : "líneas"} · {fmtQty(r.total_units)} u
+          {routeGroups.map((group) => (
+            <Collapsible key={group.key} defaultOpen={singleGroup}>
+              <div className="rounded-xl border overflow-hidden">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full items-start gap-2 px-3 py-2.5 text-left bg-muted/30 hover:bg-muted/45 transition-colors"
+                  >
+                    <Icon
+                      icon={ArrowDown01Icon}
+                      className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm truncate">
+                        {group.route_name ?? "Ruta"}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {group.driver_name ?? "—"}
+                      </div>
+                      <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                        {group.dispatch_count}{" "}
+                        {group.dispatch_count === 1 ? "despacho" : "despachos"} ·{" "}
+                        {group.total_lines} {group.total_lines === 1 ? "línea" : "líneas"} ·{" "}
+                        <span className="font-medium text-foreground">{fmtQty(group.total_units)} u</span>
+                      </div>
+                    </div>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="divide-y border-t">
+                    {group.dispatches.map((d) => {
+                      const time = new Date(d.dispatched_at).toLocaleTimeString(APP_LOCALE, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: APP_TZ,
+                      });
+                      return (
+                        <div
+                          key={d.id}
+                          className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted/20"
+                        >
+                          <div className="w-12 shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                            {time}
+                          </div>
+                          <div className="flex-1 min-w-0 text-xs text-muted-foreground">
+                            {d.line_count} {d.line_count === 1 ? "línea" : "líneas"} ·{" "}
+                            <span className="font-medium text-foreground tabular-nums">
+                              {fmtQty(d.total_units)} u
+                            </span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={() => setOpenId(d.id)}
+                          >
+                            <Icon icon={ViewIcon} className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setOpenId(r.id)}>
-                  <Icon icon={ViewIcon} className="h-4 w-4" />
-                </Button>
+                </CollapsibleContent>
               </div>
-            );
-          })}
+            </Collapsible>
+          ))}
         </div>
       </CardContent>
 
@@ -823,61 +1015,71 @@ function DailySummaryCard({ date }: { date: string }) {
   );
 }
 
-function TruckReturnCard({ date }: { date: string }) {
+function RouteReturnCard({ date }: { date: string }) {
   const qc = useQueryClient();
   const { branchId } = useBranchScope();
   const listFn = useServerFn(listDispatchesToday);
-  const getDispatchFn = useServerFn(getDispatch);
-  const getReturnFn = useServerFn(getTruckReturnForDispatch);
-  const saveFn = useServerFn(registerTruckReturn);
+  const getReturnFn = useServerFn(getTruckReturnForRouteDay);
+  const saveFn = useServerFn(registerTruckReturnForRouteDay);
 
-  const [dispatchId, setDispatchId] = useState<string>("");
+  const [groupKey, setGroupKey] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [rows, setRows] = useState<ReturnRow[]>([]);
-
-  useEffect(() => {
-    setDispatchId("");
-  }, [date]);
 
   const { data: dispatches, isLoading: loadingList } = useQuery({
     queryKey: ["dispatches", "today", date, branchId],
     queryFn: () => listFn({ data: { date, branch_id: branchId } }),
   });
 
-  const { data: dispatchDetail, isLoading: loadingDetail } = useQuery({
-    queryKey: ["dispatch", dispatchId],
-    queryFn: () => getDispatchFn({ data: { id: dispatchId } }),
-    enabled: !!dispatchId,
-  });
+  const routeGroups = useMemo(() => buildRouteGroups(dispatches ?? []), [dispatches]);
 
-  const { data: existingReturns, isLoading: loadingReturns } = useQuery({
-    queryKey: ["truck-return", dispatchId],
-    queryFn: () => getReturnFn({ data: { dispatch_id: dispatchId } }),
-    enabled: !!dispatchId,
+  useEffect(() => {
+    if (routeGroups.length === 0) {
+      setGroupKey("");
+      return;
+    }
+    setGroupKey((prev) => {
+      if (prev && routeGroups.some((g) => g.key === prev)) return prev;
+      return routeGroups.length === 1 ? routeGroups[0].key : "";
+    });
+  }, [routeGroups, date]);
+
+  const selectedGroup = routeGroups.find((g) => g.key === groupKey);
+
+  const { data: routeReturn, isLoading: loadingReturn } = useQuery({
+    queryKey: ["truck-return-route", date, groupKey, branchId],
+    queryFn: () =>
+      getReturnFn({
+        data: {
+          date,
+          route_id: selectedGroup!.route_id,
+          driver_id: selectedGroup!.driver_id,
+          branch_id: branchId,
+        },
+      }),
+    enabled: !!selectedGroup,
   });
 
   useEffect(() => {
-    if (!dispatchDetail) {
+    if (!routeReturn) {
       setRows([]);
       return;
     }
-    const returnMap = new Map((existingReturns ?? []).map((r) => [r.product_id, r.quantity]));
     setRows(
-      dispatchDetail.items.map((it) => ({
-        product_id: it.product_id,
-        product_name: it.product_name,
-        unit: it.unit,
-        dispatched: it.quantity,
-        quantity: returnMap.has(it.product_id) ? String(returnMap.get(it.product_id)) : "",
+      routeReturn.products.map((p) => ({
+        product_id: p.product_id,
+        product_name: p.product_name,
+        unit: p.unit,
+        dispatched: p.total_dispatched,
+        quantity: p.total_returned > 0 ? String(p.total_returned) : "",
       })),
     );
-    const firstNote = existingReturns?.find((r) => r.notes)?.notes;
-    setNotes(firstNote ?? "");
-  }, [dispatchDetail, existingReturns]);
+    setNotes(routeReturn.notes ?? "");
+  }, [routeReturn]);
 
   const mut = useMutation({
     mutationFn: async () => {
-      if (!dispatchId) throw new Error("Selecciona un despacho.");
+      if (!selectedGroup) throw new Error("Selecciona una ruta.");
       const items = rows.map((r) => ({
         product_id: r.product_id,
         quantity: r.quantity === "" ? 0 : Number(r.quantity),
@@ -886,126 +1088,180 @@ function TruckReturnCard({ date }: { date: string }) {
         if (!Number.isFinite(it.quantity) || it.quantity < 0) {
           throw new Error("Las cantidades deben ser cero o mayores.");
         }
+        const row = rows.find((r) => r.product_id === it.product_id);
+        if (row && it.quantity > row.dispatched) {
+          throw new Error("La cantidad que quedó no puede ser mayor a lo cargado.");
+        }
       }
       return saveFn({
         data: {
-          dispatch_id: dispatchId,
+          date,
+          route_id: selectedGroup.route_id,
+          driver_id: selectedGroup.driver_id,
+          branch_id: branchId,
           notes: notes.trim() || null,
           items,
         },
       });
     },
     onSuccess: () => {
-      toast.success("Devolución de camión registrada");
-      qc.invalidateQueries({ queryKey: ["truck-return", dispatchId] });
+      toast.success("Regreso registrado");
+      qc.invalidateQueries({ queryKey: ["truck-return-route"] });
       qc.invalidateQueries({ queryKey: ["truck-reconciliation"] });
     },
     onError: (e: any) => toast.error(e?.message ?? "Error al registrar"),
   });
 
-  const selectedDispatch = dispatches?.find((d) => d.id === dispatchId);
-  const loading = loadingList || (!!dispatchId && (loadingDetail || loadingReturns));
+  const loading = loadingList || (!!selectedGroup && loadingReturn);
   const hasAnyReturn = rows.some((r) => r.quantity !== "" && Number(r.quantity) > 0);
+  const hasSavedReturn = (routeReturn?.products.some((p) => p.total_returned > 0) ?? false) || hasAnyReturn;
+
+  const totals = useMemo(() => {
+    return rows.reduce(
+      (acc, row) => {
+        const left = row.quantity === "" ? 0 : Number(row.quantity);
+        const leftNum = Number.isFinite(left) ? left : 0;
+        const sold = Math.max(0, row.dispatched - leftNum);
+        return {
+          dispatched: acc.dispatched + row.dispatched,
+          returned: acc.returned + leftNum,
+          sold: acc.sold + sold,
+        };
+      },
+      { dispatched: 0, returned: 0, sold: 0 },
+    );
+  }, [rows]);
+
+  if (loadingList) {
+    return <p className="text-sm text-muted-foreground">Cargando rutas…</p>;
+  }
+
+  if (routeGroups.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center">
+        Sin despachos en esta fecha. Registra un despacho antes de anotar el regreso.
+      </p>
+    );
+  }
 
   return (
     <Card className="relative overflow-visible border-0 shadow-none bg-transparent p-0">
-      <CardContent className="space-y-3 p-0">
+      <CardContent className="space-y-4 p-0">
         <p className="text-xs text-muted-foreground">
-          Producto que regresa sin vender. Distinto a devoluciones de clientes en ruta.
+          Al final del día, anota lo que regresó sin vender en el camión. Se consolidan todos los despachos de la ruta.
         </p>
-        <div className="space-y-1.5">
-          <Label>Despacho</Label>
-          <Select
-            value={dispatchId}
-            onValueChange={setDispatchId}
-          >
-            <SelectTrigger><SelectValue placeholder="Selecciona despacho" /></SelectTrigger>
-            <SelectContent>
-              {(dispatches ?? []).map((d) => {
-                const time = new Date(d.dispatched_at).toLocaleTimeString(APP_LOCALE, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  timeZone: APP_TZ,
-                });
-                return (
-                  <SelectItem key={d.id} value={d.id}>
-                    {time} · {d.route_name ?? "Ruta"} · {d.driver_name ?? "—"}
-                  </SelectItem>
-                );
-              })}
-              {(dispatches?.length ?? 0) === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">Sin despachos en esta fecha.</div>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
 
-        {dispatchId && (
+        {routeGroups.length > 1 && (
+          <div className="space-y-1.5">
+            <Label>Selecciona la ruta</Label>
+            <Select value={groupKey} onValueChange={setGroupKey}>
+              <SelectTrigger className="h-11">
+                <SelectValue placeholder="Elige ruta y repartidor" />
+              </SelectTrigger>
+              <SelectContent>
+                {routeGroups.map((g) => (
+                  <SelectItem key={g.key} value={g.key}>
+                    {routeGroupLabel(g)} ({g.dispatch_count} {g.dispatch_count === 1 ? "despacho" : "despachos"})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {selectedGroup && (
           <>
-            {selectedDispatch && (
-              <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                <span className="font-medium">{selectedDispatch.route_name ?? "Ruta"}</span>
-                <span className="text-muted-foreground"> · {selectedDispatch.driver_name ?? "—"}</span>
+            <div className="rounded-xl border bg-muted/30 px-4 py-3 space-y-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-semibold text-sm">{routeGroupLabel(selectedGroup)}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {selectedGroup.dispatch_count}{" "}
+                    {selectedGroup.dispatch_count === 1 ? "despacho" : "despachos"} ·{" "}
+                    {fmtQty(selectedGroup.total_units)} u cargadas
+                    {routeReturn?.dispatched_at_first && routeReturn?.dispatched_at_last
+                      ? ` · ${formatDispatchTimeRange(routeReturn.dispatched_at_first, routeReturn.dispatched_at_last)}`
+                      : null}
+                  </div>
+                </div>
+                <Badge variant={hasSavedReturn ? "success" : "warning"}>
+                  {hasSavedReturn ? "Regreso registrado" : "Regreso pendiente"}
+                </Badge>
               </div>
-            )}
+            </div>
 
             {loading && <p className="text-sm text-muted-foreground">Cargando productos…</p>}
 
             {!loading && rows.length > 0 && (
-              <div className="space-y-2">
-                <div className="hidden sm:grid sm:grid-cols-[1fr_5rem_5rem_5rem] gap-2 px-1 text-xs font-medium text-muted-foreground">
+              <div className="rounded-xl border overflow-hidden">
+                <div className="hidden sm:grid sm:grid-cols-[1fr_5.5rem_6rem_5.5rem] gap-2 px-4 py-2.5 bg-muted/40 text-xs font-medium text-muted-foreground border-b">
                   <span>Producto</span>
                   <span className="text-right">Cargado</span>
                   <span className="text-right">Quedó</span>
-                  <span className="text-right">Vendido*</span>
+                  <span className="text-right">Vendido est.</span>
                 </div>
-                {rows.map((row, idx) => {
-                  const left = row.quantity === "" ? null : Number(row.quantity);
-                  const sold =
-                    left != null && Number.isFinite(left)
-                      ? Math.max(0, row.dispatched - left)
-                      : null;
-                  return (
-                    <div
-                      key={row.product_id}
-                      className="rounded-lg border p-3 space-y-2 sm:grid sm:grid-cols-[1fr_5rem_5rem_5rem] sm:items-center sm:gap-2 sm:space-y-0"
-                    >
-                      <div className="min-w-0">
-                        <div className="font-medium text-sm truncate">{row.product_name ?? row.product_id.slice(0, 8)}</div>
-                        {row.unit && <div className="text-xs text-muted-foreground">{row.unit}</div>}
+                <div className="divide-y max-h-[360px] overflow-y-auto xl:max-h-none">
+                  {rows.map((row, idx) => {
+                    const left = row.quantity === "" ? null : Number(row.quantity);
+                    const sold =
+                      left != null && Number.isFinite(left)
+                        ? Math.max(0, row.dispatched - left)
+                        : null;
+                    return (
+                      <div
+                        key={row.product_id}
+                        className="px-4 py-3 space-y-2 sm:grid sm:grid-cols-[1fr_5.5rem_6rem_5.5rem] sm:items-center sm:gap-2 sm:space-y-0"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm truncate">
+                            {row.product_name ?? row.product_id.slice(0, 8)}
+                          </div>
+                          {row.unit && <div className="text-xs text-muted-foreground">{row.unit}</div>}
+                        </div>
+                        <div className="flex items-center justify-between sm:block sm:text-right">
+                          <span className="text-xs text-muted-foreground sm:hidden">Cargado</span>
+                          <span className="tabular-nums text-sm font-medium">{fmtQty(row.dispatched)}</span>
+                        </div>
+                        <div className="flex items-center gap-2 sm:justify-end">
+                          <span className="text-xs text-muted-foreground sm:hidden shrink-0">Quedó</span>
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            placeholder="0"
+                            value={row.quantity}
+                            onChange={(e) =>
+                              setRows((prev) =>
+                                prev.map((r, i) => (i === idx ? { ...r, quantity: e.target.value } : r)),
+                              )
+                            }
+                            className="h-10 w-full sm:w-24 text-right tabular-nums text-base"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between sm:justify-end">
+                          <span className="text-xs text-muted-foreground sm:hidden">Vendido est.</span>
+                          <span className="tabular-nums text-sm font-semibold">
+                            {sold != null ? fmtQty(sold) : "—"}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between sm:block sm:text-right">
-                        <span className="text-xs text-muted-foreground sm:hidden">Cargado</span>
-                        <span className="tabular-nums text-sm">{fmtQty(row.dispatched)}</span>
-                      </div>
-                      <div className="flex items-center gap-2 sm:justify-end">
-                        <span className="text-xs text-muted-foreground sm:hidden shrink-0">Quedó</span>
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          min="0"
-                          step="0.01"
-                          placeholder="0"
-                          value={row.quantity}
-                          onChange={(e) =>
-                            setRows((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, quantity: e.target.value } : r)),
-                            )
-                          }
-                          className="w-full sm:w-20 text-right tabular-nums"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between sm:justify-end">
-                        <span className="text-xs text-muted-foreground sm:hidden">Vendido</span>
-                        <span className="tabular-nums text-sm font-medium">
-                          {sold != null ? fmtQty(sold) : "—"}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-                <p className="text-xs text-muted-foreground">
-                  * Vendido estimado = cargado − quedó. No incluye intercambios de clientes en ruta.
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-[1fr_5.5rem_6rem_5.5rem] gap-2 px-4 py-3 bg-muted/20 border-t text-sm font-medium">
+                  <span className="col-span-2 sm:col-span-1">Total</span>
+                  <span className="text-right tabular-nums hidden sm:block">{fmtQty(totals.dispatched)}</span>
+                  <span className="text-right tabular-nums hidden sm:block">{fmtQty(totals.returned)}</span>
+                  <span className="text-right tabular-nums hidden sm:block">{fmtQty(totals.sold)}</span>
+                  <div className="col-span-2 sm:hidden flex justify-between text-xs text-muted-foreground">
+                    <span>Cargado {fmtQty(totals.dispatched)}</span>
+                    <span>Quedó {fmtQty(totals.returned)}</span>
+                    <span>Vendido {fmtQty(totals.sold)}</span>
+                  </div>
+                </div>
+                <p className="px-4 pb-3 text-xs text-muted-foreground">
+                  Vendido estimado = cargado − quedó. No incluye intercambios de clientes en ruta.
                 </p>
               </div>
             )}
@@ -1017,18 +1273,30 @@ function TruckReturnCard({ date }: { date: string }) {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 maxLength={500}
-                placeholder="Observaciones de la devolución"
+                placeholder="Observaciones del regreso"
               />
             </div>
 
             <Button
               onClick={() => mut.mutate()}
-              disabled={!dispatchId || mut.isPending}
-              className="w-full sm:w-auto"
+              disabled={!selectedGroup || mut.isPending || rows.length === 0}
+              className="w-full sm:w-auto h-11"
             >
-              {mut.isPending ? "Guardando…" : hasAnyReturn ? "Registrar devolución" : "Limpiar devolución"}
+              {mut.isPending
+                ? "Guardando…"
+                : hasSavedReturn
+                  ? "Actualizar regreso"
+                  : hasAnyReturn
+                    ? "Registrar regreso"
+                    : "Limpiar regreso"}
             </Button>
           </>
+        )}
+
+        {routeGroups.length > 1 && !groupKey && (
+          <p className="text-sm text-muted-foreground rounded-lg border border-dashed px-4 py-5 text-center">
+            Elige la ruta para ver los productos cargados y registrar el regreso.
+          </p>
         )}
       </CardContent>
     </Card>
@@ -1106,71 +1374,165 @@ function ReconciliationCard({ date }: { date: string }) {
     queryFn: () => recFn({ data: { date, branch_id: branchId } }),
   });
 
+  const branchTotals = useMemo(() => {
+    return (data ?? []).reduce(
+      (acc, g) => ({
+        dispatched: acc.dispatched + g.totals.dispatched,
+        sold: acc.sold + g.totals.sold,
+        customer_returns: acc.customer_returns + g.totals.customer_returns,
+        actual_returned: acc.actual_returned + g.totals.actual_returned,
+        on_truck: acc.on_truck + g.totals.on_truck,
+        difference: acc.difference + g.totals.difference,
+      }),
+      { dispatched: 0, sold: 0, customer_returns: 0, actual_returned: 0, on_truck: 0, difference: 0 },
+    );
+  }, [data]);
+
+  const singleGroup = (data?.length ?? 0) === 1;
+
   return (
     <Card className="relative overflow-visible border-0 shadow-none bg-transparent p-0">
-      <CardContent className="space-y-3 p-0">
+      <CardContent className="space-y-4 p-0">
         <p className="text-xs text-muted-foreground">
-          Cargado − vendido + devuelto clientes = calculado. Compara con lo registrado al regreso.
+          Compara lo calculado (cargado − vendido − dev. clientes) con lo registrado en el regreso.
         </p>
 
         {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
         {!isLoading && (data?.length ?? 0) === 0 && (
-          <p className="text-sm text-muted-foreground">Sin movimientos en esta fecha.</p>
+          <p className="text-sm text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center">
+            Sin movimientos en esta fecha.
+          </p>
         )}
 
         <div className="space-y-3">
-          {(data ?? []).map((g) => (
-            <div key={g.key} className="rounded-lg border overflow-hidden">
-              <div className="flex flex-col gap-2 border-b bg-muted/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="font-medium">{g.route_name ?? "Ruta"}</div>
-                  <div className="text-xs text-muted-foreground">{g.driver_name ?? "—"}</div>
+          {(data ?? []).map((g) => {
+            const balanced = g.totals.difference === 0;
+            return (
+              <Collapsible key={g.key} defaultOpen={singleGroup}>
+                <div className="rounded-xl border overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full flex-col gap-3 border-b bg-muted/40 px-4 py-3 text-left hover:bg-muted/55 transition-colors sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm">{g.route_name ?? "Ruta"}</div>
+                        <div className="text-xs text-muted-foreground">{g.driver_name ?? "—"}</div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
+                          <span>
+                            Cargado <b className="text-foreground">{fmtQty(g.totals.dispatched)}</b>
+                          </span>
+                          <span>
+                            Vendido <b className="text-foreground">{fmtQty(g.totals.sold)}</b>
+                          </span>
+                          <span>
+                            Regreso <b className="text-foreground">{fmtQty(g.totals.actual_returned)}</b>
+                          </span>
+                        </div>
+                        <Badge variant={balanced ? "success" : "destructive"}>
+                          {balanced
+                            ? "✓ Cuadra"
+                            : g.totals.difference > 0
+                              ? `+${fmtQty(g.totals.difference)}`
+                              : fmtQty(g.totals.difference)}
+                        </Badge>
+                        <Icon
+                          icon={ArrowDown01Icon}
+                          className="h-4 w-4 text-muted-foreground shrink-0"
+                        />
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[680px] text-sm">
+                        <thead className="sticky top-0 z-10 bg-background text-xs text-muted-foreground">
+                          <tr className="border-b">
+                            <th className="text-left font-medium px-4 py-2.5">Producto</th>
+                            <th className="text-right font-medium px-3 py-2.5">Cargado</th>
+                            <th className="text-right font-medium px-3 py-2.5">Vendido</th>
+                            <th className="text-right font-medium px-3 py-2.5">Dev. clientes</th>
+                            <th className="text-right font-medium px-3 py-2.5">Calculado</th>
+                            <th className="text-right font-medium px-3 py-2.5">Regreso</th>
+                            <th className="text-right font-medium px-4 py-2.5">Diferencia</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.products.map((p) => {
+                            const hasDiff = p.difference !== 0;
+                            return (
+                              <tr key={p.product_id} className="border-b last:border-0 hover:bg-muted/20">
+                                <td className="px-4 py-2.5 truncate">
+                                  {p.product_name ?? p.product_id.slice(0, 8)}
+                                  {p.unit ? (
+                                    <span className="text-xs text-muted-foreground ml-1">({p.unit})</span>
+                                  ) : null}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.dispatched)}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.sold)}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.customer_returns)}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.on_truck)}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.actual_returned)}</td>
+                                <td
+                                  className={cn(
+                                    "px-4 py-2.5 text-right tabular-nums font-medium",
+                                    hasDiff ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
+                                  )}
+                                >
+                                  {hasDiff ? fmtQty(p.difference) : "0"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-muted/20 font-medium">
+                            <td className="px-4 py-2.5">Total ruta</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(g.totals.dispatched)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(g.totals.sold)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(g.totals.customer_returns)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(g.totals.on_truck)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(g.totals.actual_returned)}</td>
+                            <td
+                              className={cn(
+                                "px-4 py-2.5 text-right tabular-nums",
+                                g.totals.difference !== 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
+                              )}
+                            >
+                              {fmtQty(g.totals.difference)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </CollapsibleContent>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
-                  <span>Cargado <b className="text-foreground">{fmtQty(g.totals.dispatched)}</b></span>
-                  <span>Vendido <b className="text-foreground">{fmtQty(g.totals.sold)}</b></span>
-                  <span>Dev. camión <b className="text-foreground">{fmtQty(g.totals.actual_returned)}</b></span>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead className="text-xs text-muted-foreground">
-                    <tr className="border-b">
-                      <th className="text-left font-medium px-3 py-2">Producto</th>
-                      <th className="text-right font-medium px-3 py-2">Cargado</th>
-                      <th className="text-right font-medium px-3 py-2">Vendido</th>
-                      <th className="text-right font-medium px-3 py-2">Dev. clientes</th>
-                      <th className="text-right font-medium px-3 py-2">Calculado</th>
-                      <th className="text-right font-medium px-3 py-2">Dev. camión</th>
-                      <th className="text-right font-medium px-3 py-2">Diferencia</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.products.map((p) => {
-                      const negativeDiff = p.difference !== 0;
-                      return (
-                        <tr key={p.product_id} className="border-b last:border-0">
-                          <td className="px-3 py-2 truncate">
-                            {p.product_name ?? p.product_id.slice(0, 8)}
-                            {p.unit ? <span className="text-xs text-muted-foreground ml-1">({p.unit})</span> : null}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmtQty(p.dispatched)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmtQty(p.sold)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmtQty(p.customer_returns)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmtQty(p.on_truck)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmtQty(p.actual_returned)}</td>
-                          <td className={`px-3 py-2 text-right tabular-nums font-medium ${negativeDiff ? "text-destructive" : ""}`}>
-                            {fmtQty(p.difference)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+              </Collapsible>
+            );
+          })}
         </div>
+
+        {(data?.length ?? 0) > 1 && (
+          <div className="rounded-xl border bg-muted/30 px-4 py-3">
+            <div className="text-xs font-medium text-muted-foreground mb-2">Total del día</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums">
+              <span>
+                Cargado <b>{fmtQty(branchTotals.dispatched)}</b>
+              </span>
+              <span>
+                Vendido <b>{fmtQty(branchTotals.sold)}</b>
+              </span>
+              <span>
+                Regreso <b>{fmtQty(branchTotals.actual_returned)}</b>
+              </span>
+              <span className={branchTotals.difference !== 0 ? "text-destructive font-semibold" : "text-emerald-600 dark:text-emerald-400 font-semibold"}>
+                Diferencia {fmtQty(branchTotals.difference)}
+              </span>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1259,7 +1621,7 @@ function CrossBranchLoadForm() {
 
         <div className="space-y-2">
           <Label>Artículos entregados</Label>
-          <div className="space-y-1 max-h-[240px] overflow-y-auto rounded-lg border p-1.5">
+          <div className="space-y-1 max-h-[240px] overflow-y-auto rounded-lg border p-1.5 xl:max-h-none xl:min-h-[120px]">
             {(products ?? []).length === 0 && (
               <p className="text-sm text-muted-foreground py-4 text-center">No hay productos activos.</p>
             )}

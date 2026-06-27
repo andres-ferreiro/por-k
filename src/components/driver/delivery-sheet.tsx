@@ -547,7 +547,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
             {pendingBalance > 0 && (
               <div className="flex items-center justify-between mb-2 px-1 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800">
-                <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo anterior</span>
+                <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo pendiente</span>
                 <span className="text-sm font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmt(pendingBalance)}</span>
               </div>
             )}

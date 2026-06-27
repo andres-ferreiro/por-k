@@ -8,19 +8,19 @@ import { todayInTZ, tzDayRange } from "@/lib/tz";
  * must use fetchDriverDayStock / computeAvailableStock from this module.
  *
  * SELLABLE formula:
- *   available = sum(all dispatches today) + cross-branch loads − delivery_items
+ *   available = sum(all dispatches today) + cross-branch loads − delivery_items − delivery_returns
  *
- * Customer returns (delivery_returns) are intentionally excluded:
+ * Customer returns (delivery_returns) reduce available stock because:
  *   - The driver exchanges the bad product for a fresh one from the truck (no charge).
- *   - The fresh replacement is NOT re-recorded in delivery_items, so net units
- *     leaving the truck equals delivery_items.
+ *   - The fresh replacement is NOT re-recorded in delivery_items.
  *   - The returned (bad) units physically come back but are NOT resellable.
- *   - Adding customer_returns to available stock would let the driver "sell" defective units.
+ *   - Each exchange consumes one fresh sellable unit from inventory.
+ *   - Total sellable units consumed = delivery_items + delivery_returns.
  *
- * This is different from the truck reconciliation formula
- * (on_truck = dispatched − sold + customer_returns), which counts ALL physical units
- * on the truck at end of day (including unsellable bad returns) so the warehouse can
- * verify the driver's return count. The two formulas intentionally differ.
+ * This matches the truck reconciliation formula:
+ * (on_truck = dispatched − sold − customer_returns), which subtracts customer returns
+ * because those defective units are physically on truck but unsellable, so they reduce
+ * the expected sellable count that the driver should return at end of day.
  */
 
 /** Per-product quantity map keyed by product_id. */
@@ -58,17 +58,18 @@ export function mergeProductQuantities(a: ProductQuantityMap, b: ProductQuantity
 }
 
 /**
- * Sellable units remaining = loaded − sold (delivery_items).
- * Customer returns are excluded — returned units are defective and not resellable.
+ * Sellable units remaining = loaded − sold (delivery_items) − customer_returns (delivery_returns).
+ * Customer returns reduce available stock because each exchange consumes a fresh replacement unit.
  * Only products present in `loaded` appear in the result (even when available is 0).
  */
 export function computeAvailableStock(
   loaded: ProductQuantityMap,
   sold: ProductQuantityMap,
+  customerReturns: ProductQuantityMap,
 ): ProductQuantityMap {
   const stock: ProductQuantityMap = {};
   for (const [pid, loadQty] of Object.entries(loaded)) {
-    stock[pid] = Math.max(0, loadQty - (sold[pid] ?? 0));
+    stock[pid] = Math.max(0, loadQty - (sold[pid] ?? 0) - (customerReturns[pid] ?? 0));
   }
   return stock;
 }
@@ -132,7 +133,7 @@ export async function fetchDriverDayStock(
 
   const { data: deliveries, error: delErr } = await supabase
     .from("deliveries")
-    .select("id, delivery_items(product_id, quantity)")
+    .select("id, delivery_items(product_id, quantity), delivery_returns(product_id, quantity)")
     .eq("route_id", params.routeId)
     .eq("driver_id", params.driverId)
     .eq("delivery_date", date)
@@ -140,13 +141,16 @@ export async function fetchDriverDayStock(
   if (delErr) throw new Error(delErr.message);
 
   const soldRows: ItemRow[] = [];
+  const returnRows: ItemRow[] = [];
   for (const del of deliveries ?? []) {
     if (params.excludeDeliveryId && del.id === params.excludeDeliveryId) continue;
     for (const it of (del.delivery_items ?? []) as ItemRow[]) soldRows.push(it);
+    for (const it of (del.delivery_returns ?? []) as ItemRow[]) returnRows.push(it);
   }
 
   const sold = sumProductQuantities(soldRows);
-  const stock = computeAvailableStock(loaded, sold);
+  const customerReturns = sumProductQuantities(returnRows);
+  const stock = computeAvailableStock(loaded, sold, customerReturns);
 
   return {
     dispatch_id: dispatchId,

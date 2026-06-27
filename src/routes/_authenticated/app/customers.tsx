@@ -29,10 +29,11 @@ import { StatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { LocationPicker } from "@/components/location-picker";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterByBranch, filterBySearch, filterByActive } from "@/lib/table-utils";
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  FilterSelect, StatusFilterSelect,
+  FilterSelect, StatusFilterSelect, TablePagination,
 } from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/app/customers")({
@@ -127,6 +128,8 @@ function CustomersPage() {
     });
   }, [customers, branchId, search, locationFilter, statusFilter, sort]);
 
+  const pagination = usePagination(rows, undefined, [search, locationFilter, statusFilter, sortKey, sortDir, branchId]);
+
   const colSpan = isOwner ? 7 : 6;
 
   return (
@@ -184,7 +187,7 @@ function CustomersPage() {
             {!isLoading && rows.length === 0 && (
               <TableStatusRow colSpan={colSpan} empty emptyMessage="Aún no hay clientes." />
             )}
-            {rows.map((c) => (
+            {pagination.paginatedItems.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell>
@@ -219,6 +222,7 @@ function CustomersPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <CustomerDialog

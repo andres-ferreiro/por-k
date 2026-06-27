@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/bodega.functions";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { usePagination } from "@/hooks/use-pagination";
 import {
   getValidDeliveryDates,
   bodegaDeadlineMessage,
@@ -60,6 +61,7 @@ import {
   PageHeader,
   DataTableCard,
   TableStatusRow,
+  TablePagination,
 } from "@/components/admin/data-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
@@ -105,6 +107,9 @@ export function BodegaInterOrderForm({
     enabled: !!branchId,
   });
 
+  const historyRows = historyQ.data ?? [];
+  const pagination = usePagination(historyRows);
+
   const targetLabel = targetBodegas.find((b) => b.id === targetBodegaId)?.label ?? "";
 
   return (
@@ -147,10 +152,10 @@ export function BodegaInterOrderForm({
           </TableHeader>
           <TableBody>
             <TableStatusRow colSpan={5} loading={historyQ.isLoading} />
-            {!historyQ.isLoading && (historyQ.data ?? []).length === 0 && (
+            {!historyQ.isLoading && historyRows.length === 0 && (
               <TableStatusRow colSpan={5} empty emptyMessage="Sin pedidos inter-bodega." />
             )}
-            {(historyQ.data ?? []).map((o) => (
+            {pagination.paginatedItems.map((o) => (
               <TableRow key={o.id}>
                 <TableCell>{formatDateLabel(o.delivery_date)}</TableCell>
                 <TableCell>{o.bodega_name}</TableCell>
@@ -167,6 +172,7 @@ export function BodegaInterOrderForm({
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <InterOrderSheet

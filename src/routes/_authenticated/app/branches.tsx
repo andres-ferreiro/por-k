@@ -18,10 +18,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 import { toast } from "sonner";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterBySearch, filterByActive } from "@/lib/table-utils";
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  StatusFilterSelect,
+  StatusFilterSelect, TablePagination,
 } from "@/components/admin/data-table";
 import { ActiveStatusBadge, StatusBadge } from "@/components/admin/status-badge";
 
@@ -67,6 +68,8 @@ function BranchesPage() {
     });
   }, [data, search, statusFilter, sort]);
 
+  const pagination = usePagination(rows, undefined, [search, statusFilter, sortKey, sortDir]);
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -105,7 +108,7 @@ function BranchesPage() {
             {!isLoading && rows.length === 0 && (
               <TableStatusRow colSpan={isOwner ? 7 : 5} empty emptyMessage="Aún no hay sucursales." />
             )}
-            {rows.map((b) => (
+            {pagination.paginatedItems.map((b) => (
               <TableRow key={b.id}>
                 <TableCell className="font-medium">{b.name}</TableCell>
                 <TableCell>{b.address ?? "—"}</TableCell>
@@ -134,6 +137,7 @@ function BranchesPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <BranchDialog open={open} onOpenChange={setOpen} editing={editing} isOwner={isOwner} />

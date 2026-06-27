@@ -15,12 +15,13 @@ import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterBySearch } from "@/lib/table-utils";
 import { downloadCSV } from "@/lib/csv";
 
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  FilterSelect, FilterDateRangePicker,
+  FilterSelect, FilterDateRangePicker, TablePagination,
 } from "@/components/admin/data-table";
 import { PaymentStatusBadge, StatusBadge } from "@/components/admin/status-badge";
 import { StatCardBar, StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
@@ -85,6 +86,8 @@ function PaymentsPage() {
       return (r as Record<string, unknown>)[key];
     });
   }, [rows, search, sort]);
+
+  const pagination = usePagination(tableRows, undefined, [search, sortKey, sortDir, dateFrom, dateTo, routeId, driverId, method, status, origin]);
 
   const totals = useMemo(() => {
     const paid = tableRows.filter((p) => p.status === "paid");
@@ -218,7 +221,7 @@ function PaymentsPage() {
             {!isLoading && tableRows.length === 0 && (
               <TableStatusRow colSpan={8} empty emptyMessage="Sin pagos para los filtros seleccionados." />
             )}
-            {tableRows.map((r) => (
+            {pagination.paginatedItems.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(r.paid_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
@@ -238,6 +241,7 @@ function PaymentsPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
     </div>
   );

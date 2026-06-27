@@ -9,10 +9,11 @@ import {
   listProductCustomerPrices, upsertCustomerPrice, deleteCustomerPrice,
 } from "@/lib/api/products.functions";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterBySearch, filterByActive } from "@/lib/table-utils";
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  StatusFilterSelect,
+  StatusFilterSelect, TablePagination,
 } from "@/components/admin/data-table";
 import { ActiveStatusBadge } from "@/components/admin/status-badge";
 import { ProductOrderEditor } from "@/components/admin/product-order-editor";
@@ -57,6 +58,8 @@ function ProductsPage() {
       return (p as Record<string, unknown>)[key];
     });
   }, [data, search, statusFilter, sort]);
+
+  const pagination = usePagination(rows, undefined, [search, statusFilter, sortKey, sortDir]);
 
   return (
     <div className="space-y-4">
@@ -114,7 +117,7 @@ function ProductsPage() {
             {!isLoading && rows.length === 0 && (
               <TableStatusRow colSpan={5} empty emptyMessage="Sin productos." />
             )}
-            {rows.map((p: any) => (
+            {pagination.paginatedItems.map((p: any) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
                 <TableCell>{p.unit}</TableCell>
@@ -132,6 +135,7 @@ function ProductsPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
       )}
 

@@ -140,6 +140,15 @@ export const createDispatch = createServerFn({ method: "POST" })
       await context.supabase.from("dispatches").delete().eq("id", dispatchId);
       throw new Error(itemsErr.message);
     }
+
+    // Carry unpaid balances from the previous day into customers.pending_balance so
+    // the driver sees "Saldo pendiente" on today's delivery sheet.
+    const yesterday = todayInTZ(new Date(Date.now() - 86_400_000));
+    await context.supabase.rpc("carry_over_pending_balance", {
+      p_branch_id: branchId,
+      p_date: yesterday,
+    });
+
     return { id: dispatchId };
   });
 
@@ -337,6 +346,326 @@ export const registerTruckReturn = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+const routeDaySchema = z.object({
+  date: dateOnly,
+  route_id: z.string().uuid(),
+  driver_id: z.string().uuid(),
+  branch_id: z.string().uuid().optional().nullable(),
+});
+
+type RouteDayDispatch = {
+  id: string;
+  dispatched_at: string;
+  items: Map<string, { quantity: number; name: string | null; unit: string | null }>;
+};
+
+async function fetchRouteDayDispatches(
+  supabase: any,
+  params: { dateStr: string; routeId: string; driverId: string; branchId: string | null },
+): Promise<RouteDayDispatch[]> {
+  const { startISO, endISO } = tzDayRange(params.dateStr);
+  let q = supabase
+    .from("dispatches")
+    .select("id, dispatched_at, dispatch_items(product_id, quantity, products(name, unit))")
+    .eq("route_id", params.routeId)
+    .eq("driver_id", params.driverId)
+    .gte("dispatched_at", startISO)
+    .lt("dispatched_at", endISO)
+    .order("dispatched_at", { ascending: false });
+  if (params.branchId) q = q.eq("branch_id", params.branchId);
+  const { data: rows, error } = await q;
+  if (error) throw new Error(error.message);
+
+  return (rows ?? []).map((d: any) => {
+    const items = new Map<string, { quantity: number; name: string | null; unit: string | null }>();
+    for (const it of d.dispatch_items ?? []) {
+      const pid = it.product_id as string;
+      const prev = items.get(pid);
+      const qty = Number(it.quantity ?? 0);
+      if (prev) {
+        prev.quantity += qty;
+      } else {
+        items.set(pid, {
+          quantity: qty,
+          name: it.products?.name ?? null,
+          unit: it.products?.unit ?? null,
+        });
+      }
+    }
+    return {
+      id: d.id as string,
+      dispatched_at: d.dispatched_at as string,
+      items,
+    };
+  });
+}
+
+function allocateTruckReturnsLifo(
+  dispatches: RouteDayDispatch[],
+  items: { product_id: string; quantity: number }[],
+): Map<string, Map<string, number>> {
+  const allocation = new Map<string, Map<string, number>>();
+
+  for (const item of items) {
+    if (item.quantity <= 0) continue;
+    let remaining = item.quantity;
+    for (const dispatch of dispatches) {
+      const meta = dispatch.items.get(item.product_id);
+      if (!meta || meta.quantity <= 0) continue;
+      const assign = Math.min(remaining, meta.quantity);
+      if (assign <= 0) continue;
+      if (!allocation.has(dispatch.id)) allocation.set(dispatch.id, new Map());
+      allocation.get(dispatch.id)!.set(item.product_id, assign);
+      remaining -= assign;
+      if (remaining <= 0) break;
+    }
+    if (remaining > 0) {
+      throw new Error("La cantidad que quedó excede lo cargado en la ruta.");
+    }
+  }
+
+  return allocation;
+}
+
+async function persistTruckReturnRows(
+  supabase: any,
+  userId: string,
+  dispatchIds: string[],
+  items: { product_id: string; quantity: number }[],
+  allocation: Map<string, Map<string, number>>,
+  notes: string | null,
+): Promise<void> {
+  const zeroProductIds = items.filter((i) => i.quantity === 0).map((i) => i.product_id);
+  const positiveProductIds = new Set(items.filter((i) => i.quantity > 0).map((i) => i.product_id));
+  const returnedAt = new Date().toISOString();
+
+  if (items.every((i) => i.quantity === 0)) {
+    const { error } = await supabase.from("truck_returns").delete().in("dispatch_id", dispatchIds);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  if (zeroProductIds.length > 0) {
+    const { error } = await supabase
+      .from("truck_returns")
+      .delete()
+      .in("dispatch_id", dispatchIds)
+      .in("product_id", zeroProductIds);
+    if (error) throw new Error(error.message);
+  }
+
+  const upsertRows: {
+    dispatch_id: string;
+    product_id: string;
+    quantity: number;
+    returned_by: string;
+    notes: string | null;
+    returned_at: string;
+  }[] = [];
+
+  for (const [dispatchId, productMap] of allocation) {
+    for (const [productId, quantity] of productMap) {
+      if (quantity > 0) {
+        upsertRows.push({
+          dispatch_id: dispatchId,
+          product_id: productId,
+          quantity,
+          returned_by: userId,
+          notes,
+          returned_at: returnedAt,
+        });
+      }
+    }
+  }
+
+  if (upsertRows.length > 0) {
+    const { error: upsErr } = await supabase
+      .from("truck_returns")
+      .upsert(upsertRows, { onConflict: "dispatch_id,product_id" });
+    if (upsErr) throw new Error(upsErr.message);
+  }
+
+  for (const dispatchId of dispatchIds) {
+    const allocated = allocation.get(dispatchId);
+    const toDelete: string[] = [];
+    if (allocated) {
+      for (const productId of positiveProductIds) {
+        if (!allocated.has(productId) || (allocated.get(productId) ?? 0) === 0) {
+          toDelete.push(productId);
+        }
+      }
+    } else {
+      toDelete.push(...positiveProductIds);
+    }
+    if (toDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from("truck_returns")
+        .delete()
+        .eq("dispatch_id", dispatchId)
+        .in("product_id", toDelete);
+      if (delErr) throw new Error(delErr.message);
+    }
+  }
+}
+
+export const getTruckReturnForRouteDay = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => routeDaySchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
+    const dateStr = data.date ?? todayInTZ();
+
+    const dispatches = await fetchRouteDayDispatches(context.supabase, {
+      dateStr,
+      routeId: data.route_id,
+      driverId: data.driver_id,
+      branchId,
+    });
+
+    if (dispatches.length === 0) {
+      throw new Error("No hay despachos para esta ruta en la fecha seleccionada.");
+    }
+
+    const dispatchIds = dispatches.map((d) => d.id);
+    const { data: returnRows, error: trErr } = await context.supabase
+      .from("truck_returns")
+      .select("product_id, quantity, notes, products(name, unit)")
+      .in("dispatch_id", dispatchIds);
+    if (trErr) throw new Error(trErr.message);
+
+    type ProductAgg = {
+      product_id: string;
+      product_name: string | null;
+      unit: string | null;
+      total_dispatched: number;
+      total_returned: number;
+    };
+    const products = new Map<string, ProductAgg>();
+
+    for (const dispatch of dispatches) {
+      for (const [productId, meta] of dispatch.items) {
+        let p = products.get(productId);
+        if (!p) {
+          p = {
+            product_id: productId,
+            product_name: meta.name,
+            unit: meta.unit,
+            total_dispatched: 0,
+            total_returned: 0,
+          };
+          products.set(productId, p);
+        } else {
+          if (!p.product_name && meta.name) p.product_name = meta.name;
+          if (!p.unit && meta.unit) p.unit = meta.unit;
+        }
+        p.total_dispatched += meta.quantity;
+      }
+    }
+
+    let notes: string | null = null;
+    for (const row of returnRows ?? []) {
+      const pid = row.product_id as string;
+      let p = products.get(pid);
+      if (!p) {
+        p = {
+          product_id: pid,
+          product_name: (row as any).products?.name ?? null,
+          unit: (row as any).products?.unit ?? null,
+          total_dispatched: 0,
+          total_returned: 0,
+        };
+        products.set(pid, p);
+      }
+      p.total_returned += Number(row.quantity ?? 0);
+      if (!notes && row.notes) notes = row.notes as string;
+    }
+
+    const names = await fetchProfileNames([data.driver_id]);
+    const sorted = dispatches.slice().sort((a, b) => a.dispatched_at.localeCompare(b.dispatched_at));
+    const totalUnits = Array.from(products.values()).reduce((acc, p) => acc + p.total_dispatched, 0);
+
+    const { data: routeRow } = await context.supabase
+      .from("routes")
+      .select("name")
+      .eq("id", data.route_id)
+      .maybeSingle();
+
+    return {
+      route_id: data.route_id,
+      driver_id: data.driver_id,
+      route_name: (routeRow?.name as string | null) ?? null,
+      driver_name: names.get(data.driver_id) ?? null,
+      dispatch_count: dispatches.length,
+      total_units: totalUnits,
+      dispatched_at_first: sorted[0]?.dispatched_at ?? null,
+      dispatched_at_last: sorted[sorted.length - 1]?.dispatched_at ?? null,
+      notes,
+      products: Array.from(products.values())
+        .filter((p) => p.total_dispatched > 0)
+        .sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")),
+    };
+  });
+
+export const registerTruckReturnForRouteDay = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => {
+    const parsed = routeDaySchema
+      .extend({
+        notes: z.string().trim().max(500).optional().nullable(),
+        items: z.array(truckReturnItemSchema).min(1).max(50),
+      })
+      .parse(d);
+    const ids = parsed.items.map((i) => i.product_id);
+    if (new Set(ids).size !== ids.length) throw new Error("No repitas productos en las líneas.");
+    return parsed;
+  })
+  .handler(async ({ data, context }) => {
+    const branchId = await resolveBranchId(context.supabase, context.userId, data.branch_id);
+    const dateStr = data.date ?? todayInTZ();
+
+    const dispatches = await fetchRouteDayDispatches(context.supabase, {
+      dateStr,
+      routeId: data.route_id,
+      driverId: data.driver_id,
+      branchId,
+    });
+    if (dispatches.length === 0) {
+      throw new Error("No hay despachos para esta ruta en la fecha seleccionada.");
+    }
+
+    const dispatchIds = dispatches.map((d) => d.id);
+    const totalsByProduct = new Map<string, number>();
+    const allowedProducts = new Set<string>();
+    for (const dispatch of dispatches) {
+      for (const [productId, meta] of dispatch.items) {
+        allowedProducts.add(productId);
+        totalsByProduct.set(productId, (totalsByProduct.get(productId) ?? 0) + meta.quantity);
+      }
+    }
+
+    for (const item of data.items) {
+      if (!allowedProducts.has(item.product_id)) {
+        throw new Error("Solo puedes registrar regreso de productos despachados.");
+      }
+      const maxQty = totalsByProduct.get(item.product_id) ?? 0;
+      if (item.quantity > maxQty) {
+        throw new Error("La cantidad que quedó no puede ser mayor a lo cargado.");
+      }
+    }
+
+    const allocation = allocateTruckReturnsLifo(dispatches, data.items);
+    await persistTruckReturnRows(
+      context.supabase,
+      context.userId,
+      dispatchIds,
+      data.items,
+      allocation,
+      data.notes ?? null,
+    );
+
+    return { ok: true };
+  });
+
 export const getTruckReconciliation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -374,6 +703,15 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     if (branchId) delQ = delQ.eq("branch_id", branchId);
     const { data: deliveries, error: delErr } = await delQ;
     if (delErr) throw new Error(delErr.message);
+
+    // Fetch cross-branch loads for the day
+    let clQ = context.supabase
+      .from("cross_branch_loads")
+      .select("driver_id, cross_branch_load_items(product_id, quantity, products(name, unit))")
+      .gte("created_at", startISO)
+      .lt("created_at", endISO);
+    const { data: crossLoads, error: clErr } = await clQ;
+    if (clErr) throw new Error(clErr.message);
 
     type ProductAgg = {
       product_id: string;
@@ -448,6 +786,21 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       p.actual_returned += Number(tr.quantity ?? 0);
     }
 
+    // Add cross-branch loads to dispatched totals
+    // Match by driver_id to the route they were working that day
+    for (const cl of crossLoads ?? []) {
+      const driverId = cl.driver_id as string;
+      // Find the group(s) for this driver from dispatches/deliveries
+      const driverGroups = Array.from(groups.values()).filter((g) => g.driver_id === driverId);
+      if (driverGroups.length === 0) continue;
+      // If driver has multiple routes same day (rare), add to first one
+      const g = driverGroups[0];
+      for (const it of (cl as any).cross_branch_load_items ?? []) {
+        const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
+        p.dispatched += Number(it.quantity ?? 0);
+      }
+    }
+
     for (const del of deliveries ?? []) {
       const g = getGroup(del.route_id as string, del.driver_id as string, null);
       for (const it of (del as any).delivery_items ?? []) {
@@ -469,8 +822,8 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     return Array.from(groups.values()).map((g) => {
       const products = Array.from(g.products.values()).map((p) => ({
         ...p,
-        on_truck: p.dispatched - p.sold + p.customer_returns,
-        difference: p.dispatched - p.sold + p.customer_returns - p.actual_returned,
+        on_truck: p.dispatched - p.sold - p.customer_returns,
+        difference: p.actual_returned - (p.dispatched - p.sold - p.customer_returns),
       }));
       products.sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? ""));
       const totals = products.reduce(

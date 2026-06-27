@@ -10,6 +10,7 @@ import { todayInTZ } from "@/lib/tz";
 import { addDays, formatDateLabel } from "@/lib/bodega-deadline";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { usePagination } from "@/hooks/use-pagination";
 import { ViewIcon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ import {
   TableToolbar,
   DataTableCard,
   TableStatusRow,
+  TablePagination,
 } from "@/components/admin/data-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
@@ -118,6 +120,8 @@ export function BodegaIncomingOrders({
     }
     return rows;
   }, [ordersQ.data, statusFilter, search]);
+
+  const pagination = usePagination(filteredRows, undefined, [statusFilter, search, deliveryDate]);
 
   const stats = useMemo(() => {
     const rows = ordersQ.data ?? [];
@@ -202,7 +206,7 @@ export function BodegaIncomingOrders({
             {!ordersQ.isLoading && filteredRows.length === 0 && (
               <TableStatusRow colSpan={6} empty emptyMessage="Sin pedidos para esta fecha." />
             )}
-            {filteredRows.map((order) => (
+            {pagination.paginatedItems.map((order) => (
               <TableRow key={order.id}>
                 <TableCell className="font-medium">{order.branch_name}</TableCell>
                 <TableCell>
@@ -256,6 +260,7 @@ export function BodegaIncomingOrders({
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <IncomingOrderDetail

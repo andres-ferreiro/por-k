@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listTodayExpenses, deleteExpense, getPhotoViewUrls } from "@/lib/api/driver.functions";
+import { usePagination } from "@/hooks/use-pagination";
+import { TablePagination } from "@/components/admin/data-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ExpenseSheet } from "@/components/driver/expense-sheet";
@@ -53,6 +55,7 @@ function Page() {
   }
 
   const rows = data ?? [];
+  const pagination = usePagination(rows);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   const fmt = (n: number) =>
     n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
@@ -87,7 +90,7 @@ function Page() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {rows.map((r) => (
+          {pagination.paginatedItems.map((r) => (
             <Card key={r.id} className="overflow-hidden">
               <CardContent className="py-0 px-0 flex items-stretch">
                 {/* Thumbnail */}
@@ -132,6 +135,10 @@ function Page() {
             </Card>
           ))}
         </div>
+      )}
+
+      {rows.length > pagination.pageSize && (
+        <TablePagination {...pagination.controls} className="border rounded-lg bg-card" />
       )}
 
       {/* FAB */}

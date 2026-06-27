@@ -4,6 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { getTransferHistory } from "@/lib/api/transfer-driver.functions";
 import { formatDateLabel } from "@/lib/bodega-deadline";
 import { StatusBadge } from "@/components/admin/status-badge";
+import { usePagination } from "@/hooks/use-pagination";
+import { TablePagination } from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/supply-driver/history")({
   component: TransferHistoryPage,
@@ -16,6 +18,9 @@ function TransferHistoryPage() {
     queryFn: () => fetchHistory({ data: { limit: 40 } }),
   });
 
+  const rows = historyQ.data ?? [];
+  const pagination = usePagination(rows);
+
   return (
     <div className="space-y-4">
       <div>
@@ -27,14 +32,14 @@ function TransferHistoryPage() {
         <p className="text-sm text-muted-foreground py-8 text-center">Cargando…</p>
       )}
 
-      {!historyQ.isLoading && (historyQ.data ?? []).length === 0 && (
+      {!historyQ.isLoading && rows.length === 0 && (
         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
           Sin entregas registradas aún.
         </div>
       )}
 
       <div className="space-y-2">
-        {(historyQ.data ?? []).map((row) => (
+        {pagination.paginatedItems.map((row) => (
           <div key={row.id} className="rounded-xl border bg-card p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -50,6 +55,7 @@ function TransferHistoryPage() {
           </div>
         ))}
       </div>
+      <TablePagination {...pagination.controls} className="border rounded-lg bg-card" />
     </div>
   );
 }

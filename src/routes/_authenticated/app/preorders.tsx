@@ -17,6 +17,7 @@ import {
 import { listBranchDrivers } from "@/lib/api/routes.functions";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { usePagination } from "@/hooks/use-pagination";
 import { todayInTZ } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import {
-  PageHeader, TableToolbar, DataTableCard, TableStatusRow,
+  PageHeader, TableToolbar, DataTableCard, TableStatusRow, TablePagination,
 } from "@/components/admin/data-table";
 import { StatGrid, StatCardSimple } from "@/components/admin/stat-cards";
 
@@ -111,6 +112,8 @@ function PreordersPage() {
     const orderTotal = (ordersQ.data ?? []).reduce((s, o) => s + o.total, 0);
     return { total, withOrder, pending: total - withOrder, orderTotal };
   }, [rows, orderMap, ordersQ.data]);
+
+  const pagination = usePagination(rows, undefined, [search, deliveryDate]);
 
   if (!branchId) {
     return (
@@ -233,7 +236,7 @@ function PreordersPage() {
                 </TableCell>
               </TableRow>
             )}
-            {rows.map((c) => {
+            {pagination.paginatedItems.map((c) => {
               const order = orderMap.get(c.id);
               return (
                 <TableRow key={c.id}>
@@ -273,6 +276,7 @@ function PreordersPage() {
             })}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <OrderDialog

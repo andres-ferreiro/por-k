@@ -11,10 +11,11 @@ import { getMyContext } from "@/lib/api/context.functions";
 import { listBranches } from "@/lib/api/branches.functions";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterByBranch, filterBySearch, filterByActive } from "@/lib/table-utils";
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  StatusFilterSelect,
+  StatusFilterSelect, TablePagination,
 } from "@/components/admin/data-table";
 import { ActiveStatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,8 @@ function RoutesPage() {
     });
   }, [routes, branchId, search, statusFilter, sort]);
 
+  const pagination = usePagination(rows, undefined, [search, statusFilter, sortKey, sortDir, branchId]);
+
   const colSpan = isOwner ? 6 : 5;
 
   return (
@@ -140,7 +143,7 @@ function RoutesPage() {
             {!isLoading && !isError && rows.length === 0 && (
               <TableStatusRow colSpan={colSpan} empty emptyMessage="Aún no hay rutas." />
             )}
-            {rows.map((r) => (
+            {pagination.paginatedItems.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">
                   <Link to="/app/routes/$routeId" params={{ routeId: r.id }} className="hover:underline">
@@ -170,6 +173,7 @@ function RoutesPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <RouteDialog

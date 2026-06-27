@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { usePagination } from "@/hooks/use-pagination";
 import { SelectItem } from "@/components/ui/select";
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
@@ -26,6 +27,7 @@ import { downloadCSV } from "@/lib/csv";
 
 import {
   PageHeader, TableToolbar, DataTableCard, FilterSelect, FilterDateRangePicker,
+  TablePagination,
 } from "@/components/admin/data-table";
 
 export const Route = createFileRoute("/_authenticated/app/reports")({
@@ -155,6 +157,8 @@ function ByProduct({ filters }: { filters: Filters }) {
     queryFn: () => fn({ data: filters }),
   });
   const total = useMemo(() => (data ?? []).reduce((a, r) => a + r.amount, 0), [data]);
+  const rows = data ?? [];
+  const pagination = usePagination(rows, undefined, [filters]);
   return (
     <DataTableCard>
       <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
@@ -178,7 +182,7 @@ function ByProduct({ filters }: { filters: Filters }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data ?? []).map((r) => (
+                {pagination.paginatedItems.map((r) => (
                   <TableRow key={r.product_id}>
                     <TableCell>{r.product_name ?? r.product_id.slice(0,8)} {r.unit && <span className="text-xs text-muted-foreground">({r.unit})</span>}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.units_sold)}</TableCell>
@@ -186,13 +190,16 @@ function ByProduct({ filters }: { filters: Filters }) {
                     <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.amount)}</TableCell>
                   </TableRow>
                 ))}
+                {pagination.page === pagination.totalPages && (
                 <TableRow className="font-semibold bg-muted/40">
                   <TableCell colSpan={3}>Total</TableCell>
                   <TableCell className="text-right tabular-nums">{fmtMoney(total)}</TableCell>
                 </TableRow>
+                )}
               </TableBody>
             </Table>
         )}
+        <TablePagination {...pagination.controls} />
       </div>
     </DataTableCard>
   );
@@ -214,6 +221,8 @@ function ByDriver({ filters }: { filters: Filters }) {
       net: rows.reduce((a, r) => a + r.net, 0),
     };
   }, [data]);
+  const rows = data ?? [];
+  const pagination = usePagination(rows, undefined, [filters]);
   return (
     <DataTableCard>
       <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
@@ -239,7 +248,7 @@ function ByDriver({ filters }: { filters: Filters }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data ?? []).map((r) => (
+                {pagination.paginatedItems.map((r) => (
                   <TableRow key={r.driver_id}>
                     <TableCell>{r.driver_name ?? r.driver_id.slice(0,8)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtMoney(r.sold)}</TableCell>
@@ -249,6 +258,7 @@ function ByDriver({ filters }: { filters: Filters }) {
                     <TableCell className={`text-right tabular-nums font-medium ${r.net < 0 ? "text-destructive" : ""}`}>{fmtMoney(r.net)}</TableCell>
                   </TableRow>
                 ))}
+                {pagination.page === pagination.totalPages && (
                 <TableRow className="font-semibold bg-muted/40">
                   <TableCell>Total</TableCell>
                   <TableCell className="text-right tabular-nums">{fmtMoney(totals.sold)}</TableCell>
@@ -257,9 +267,11 @@ function ByDriver({ filters }: { filters: Filters }) {
                   <TableCell className="text-right tabular-nums">{fmtMoney(totals.expenses)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmtMoney(totals.net)}</TableCell>
                 </TableRow>
+                )}
               </TableBody>
             </Table>
         )}
+        <TablePagination {...pagination.controls} />
       </div>
     </DataTableCard>
   );
@@ -271,6 +283,8 @@ function ByCustomer({ filters }: { filters: Filters }) {
     queryKey: ["rep", "customer", filters],
     queryFn: () => fn({ data: { ...filters, limit: 100 } }),
   });
+  const rows = data ?? [];
+  const pagination = usePagination(rows, undefined, [filters]);
   return (
     <DataTableCard>
       <div className="flex flex-row items-center justify-between px-4 py-3 border-b">
@@ -293,7 +307,7 @@ function ByCustomer({ filters }: { filters: Filters }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data ?? []).map((r) => (
+                {pagination.paginatedItems.map((r) => (
                   <TableRow key={r.customer_id}>
                     <TableCell>{r.customer_name ?? r.customer_id.slice(0,8)}</TableCell>
                     <TableCell className="text-right tabular-nums">{r.visits}</TableCell>
@@ -303,6 +317,7 @@ function ByCustomer({ filters }: { filters: Filters }) {
               </TableBody>
             </Table>
         )}
+        <TablePagination {...pagination.controls} />
       </div>
     </DataTableCard>
   );
@@ -319,6 +334,9 @@ function ByRouteEfficiency({ filters }: { filters: Filters }) {
     queryKey: ["rep", "efficiency", filters],
     queryFn: () => fn({ data: filters }),
   });
+
+  const rows = data ?? [];
+  const pagination = usePagination(rows, undefined, [filters]);
 
   return (
     <DataTableCard>
@@ -371,7 +389,7 @@ function ByRouteEfficiency({ filters }: { filters: Filters }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(data ?? []).map((r) => (
+              {pagination.paginatedItems.map((r) => (
                 <TableRow key={`${r.date}-${r.route_id}`}>
                   <TableCell className="sticky left-0 z-10 bg-card whitespace-nowrap text-xs shadow-[1px_0_0_0_hsl(var(--border))]">{r.date}</TableCell>
                   <TableCell>{r.route_name}</TableCell>
@@ -395,6 +413,7 @@ function ByRouteEfficiency({ filters }: { filters: Filters }) {
             </TableBody>
           </Table>
         )}
+        <TablePagination {...pagination.controls} />
       </div>
     </DataTableCard>
   );
@@ -411,6 +430,8 @@ function ReturnsReport({ filters }: { filters: Filters }) {
 
   const deliveryRows = data?.delivery_returns ?? [];
   const truckRows = data?.truck_returns ?? [];
+  const deliveryPagination = usePagination(deliveryRows, undefined, [filters, tab]);
+  const truckPagination = usePagination(truckRows, undefined, [filters, tab]);
 
   function exportDeliveryCSV() {
     downloadCSV(
@@ -474,7 +495,7 @@ function ReturnsReport({ filters }: { filters: Filters }) {
                 {!isLoading && deliveryRows.length === 0 && (
                   <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">Sin devoluciones de clientes en el período.</TableCell></TableRow>
                 )}
-                {deliveryRows.map((r) => (
+                {deliveryPagination.paginatedItems.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap text-xs">{r.date}</TableCell>
                     <TableCell>{r.route_name ?? "—"}</TableCell>
@@ -486,6 +507,7 @@ function ReturnsReport({ filters }: { filters: Filters }) {
                 ))}
               </TableBody>
             </Table>
+            <TablePagination {...deliveryPagination.controls} />
           </DataTableCard>
         </TabsContent>
 
@@ -508,7 +530,7 @@ function ReturnsReport({ filters }: { filters: Filters }) {
                 {!isLoading && truckRows.length === 0 && (
                   <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">Sin devoluciones de camión en el período.</TableCell></TableRow>
                 )}
-                {truckRows.map((r) => (
+                {truckPagination.paginatedItems.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap text-xs">{r.date}</TableCell>
                     <TableCell>{r.route_name ?? "—"}</TableCell>
@@ -519,6 +541,7 @@ function ReturnsReport({ filters }: { filters: Filters }) {
                 ))}
               </TableBody>
             </Table>
+            <TablePagination {...truckPagination.controls} />
           </DataTableCard>
         </TabsContent>
       </Tabs>

@@ -8,10 +8,11 @@ import { listUsers, createUser, updateUser, resetUserPassword } from "@/lib/api/
 import { listBranches } from "@/lib/api/branches.functions";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterByBranch, filterBySearch, filterByActive } from "@/lib/table-utils";
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  FilterSelect, StatusFilterSelect,
+  FilterSelect, StatusFilterSelect, TablePagination,
 } from "@/components/admin/data-table";
 import { ActiveStatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
@@ -91,6 +92,8 @@ function UsersPage() {
     });
   }, [users, branchId, search, roleFilter, statusFilter, sort]);
 
+  const pagination = usePagination(rows, undefined, [search, roleFilter, statusFilter, sortKey, sortDir, branchId]);
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -140,7 +143,7 @@ function UsersPage() {
             {!isLoading && rows.length === 0 && (
               <TableStatusRow colSpan={6} empty emptyMessage="Aún no hay usuarios." />
             )}
-            {rows.map((u) => (
+            {pagination.paginatedItems.map((u) => (
               <TableRow key={u.id}>
                 <TableCell className="font-medium">{u.full_name ?? "—"}</TableCell>
                 <TableCell>{u.email ?? "—"}</TableCell>
@@ -156,6 +159,7 @@ function UsersPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <UserDialog open={open} onOpenChange={setOpen} editing={editing} branches={branches ?? []} />

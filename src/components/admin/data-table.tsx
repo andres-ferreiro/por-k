@@ -1,6 +1,6 @@
 
 import { useState } from "react";
-import { ArrowDown01Icon, ArrowUp01Icon, ArrowUpDownIcon, Calendar03Icon, Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft01Icon, ArrowRight01Icon, ArrowUp01Icon, ArrowUpDownIcon, Calendar03Icon, Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -15,10 +15,73 @@ import { cn } from "@/lib/utils";
 import { dateRangeToStrings, fmtDateMedium, fmtDateShort, parseDateStr, toDateStr } from "@/lib/format";
 import type { SortDirection } from "@/hooks/use-sorting";
 import type { DateRange } from "react-day-picker";
+import { DEFAULT_PAGE_SIZE } from "@/hooks/use-pagination";
 
 /** White card-style surface for toolbar search and filters */
 const filterSurface =
   "bg-white border-[#e1e4ea] shadow-none hover:bg-white focus-visible:bg-white";
+
+export function TablePagination({
+  page,
+  totalPages,
+  totalItems,
+  from,
+  to,
+  onPageChange,
+  className,
+  pageSize = DEFAULT_PAGE_SIZE,
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  from: number;
+  to: number;
+  onPageChange: (page: number) => void;
+  className?: string;
+  pageSize?: number;
+}) {
+  if (totalItems <= pageSize) return null;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+        className,
+      )}
+    >
+      <p className="text-xs text-muted-foreground tabular-nums">
+        {from}–{to} de {totalItems}
+      </p>
+      <div className="flex items-center gap-2 self-end sm:self-auto">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          <Icon icon={ArrowLeft01Icon} className="h-3.5 w-3.5" />
+          Anterior
+        </Button>
+        <span className="text-xs text-muted-foreground tabular-nums px-1">
+          {page} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Siguiente
+          <Icon icon={ArrowRight01Icon} className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function PageHeader({
   title,

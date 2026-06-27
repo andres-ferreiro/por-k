@@ -19,12 +19,13 @@ import { getMyContext } from "@/lib/api/context.functions";
 import { APP_LOCALE, APP_TZ, todayInTZ } from "@/lib/tz";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
+import { usePagination } from "@/hooks/use-pagination";
 import { filterBySearch } from "@/lib/table-utils";
 import { downloadCSV } from "@/lib/csv";
 
 import {
   PageHeader, TableToolbar, DataTableCard, SortableTableHead, TableStatusRow,
-  FilterSelect, FilterDateRangePicker,
+  FilterSelect, FilterDateRangePicker, TablePagination,
 } from "@/components/admin/data-table";
 import { DeliveryStatusBadge, PaymentStatusBadge, StatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { StatCardBar, StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
@@ -101,6 +102,8 @@ function DeliveriesPage() {
       return (r as Record<string, unknown>)[key];
     });
   }, [rows, search, sort]);
+
+  const pagination = usePagination(tableRows, undefined, [search, sortKey, sortDir, dateFrom, dateTo, routeId, driverId, status]);
 
   const totals = useMemo(() => {
     const all = tableRows;
@@ -221,7 +224,7 @@ function DeliveriesPage() {
             {!isLoading && tableRows.length === 0 && (
               <TableStatusRow colSpan={9} empty emptyMessage="Sin entregas para los filtros seleccionados." />
             )}
-            {tableRows.map((r) => (
+            {pagination.paginatedItems.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="whitespace-nowrap text-xs">
                   {new Date(r.created_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ, dateStyle: "short", timeStyle: "short" })}
@@ -265,6 +268,7 @@ function DeliveriesPage() {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <DeliveryDetailDialog id={openId} onClose={() => setOpenId(null)} />

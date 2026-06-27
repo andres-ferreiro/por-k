@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/bodega.functions";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { usePagination } from "@/hooks/use-pagination";
 import {
   getValidDeliveryDates,
   bodegaDeadlineMessage,
@@ -69,6 +70,7 @@ import {
   TableToolbar,
   DataTableCard,
   TableStatusRow,
+  TablePagination,
 } from "@/components/admin/data-table";
 import { StatGrid, StatCardSimple } from "@/components/admin/stat-cards";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -150,6 +152,8 @@ export function BodegaOrderForm({
     }
     return rows;
   }, [historyQ.data, statusFilter, search]);
+
+  const pagination = usePagination(filteredRows, undefined, [statusFilter, search]);
 
   const setReceipt = useServerFn(setBranchReceiptStatus);
   const cancelOrder = useServerFn(cancelBodegaOrder);
@@ -245,7 +249,7 @@ export function BodegaOrderForm({
             {!historyQ.isLoading && !historyQ.isError && filteredRows.length === 0 && (
               <TableStatusRow colSpan={6} empty emptyMessage="Sin pedidos." />
             )}
-            {filteredRows.map((o) => (
+            {pagination.paginatedItems.map((o) => (
               <TableRow key={o.id}>
                 <TableCell className="font-medium">{formatDateLabel(o.delivery_date)}</TableCell>
                 <TableCell>
@@ -326,6 +330,7 @@ export function BodegaOrderForm({
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...pagination.controls} />
       </DataTableCard>
 
       <NewOrderSheet
