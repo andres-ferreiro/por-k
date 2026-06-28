@@ -3,6 +3,7 @@ import {
   ArrowDown01Icon,
   Delete02Icon,
   SentIcon,
+  Settings02Icon,
   TruckDeliveryIcon,
   ViewIcon,
 } from "@hugeicons/core-free-icons";
@@ -225,8 +226,21 @@ function DispatchPage() {
   }
 
   return (
-    <div className="space-y-4 pb-6 xl:space-y-0 xl:flex xl:flex-col xl:gap-4 xl:pb-0 xl:h-[calc(100svh-8.5rem)] xl:overflow-hidden">
-      <div className="shrink-0 space-y-4">
+    <div className="space-y-4 pb-6 xl:pb-0 xl:-m-6 xl:flex xl:flex-col xl:gap-3 xl:p-4 xl:h-[calc(100svh-3.5rem)] xl:overflow-hidden">
+      <div className="hidden xl:flex shrink-0 items-center gap-3 min-w-0">
+        <DispatchDayStats date={date} compact className="flex-1 min-w-0" />
+        <div className="flex items-center gap-2 shrink-0">
+          {(role === "owner" || role === "supervisor") && (
+            <BranchSettingsPopover role={role} />
+          )}
+          <FilterDatePicker
+            value={date}
+            onChange={(v) => setDate(v || todayStr())}
+          />
+        </div>
+      </div>
+
+      <div className="shrink-0 space-y-4 xl:hidden">
         <PageHeader
           title="Despacho"
           description="Carga, regreso y reconciliación del camión."
@@ -245,23 +259,23 @@ function DispatchPage() {
         <DispatchDayStats date={date} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5 xl:flex-1 xl:min-h-0 xl:gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5 xl:flex-1 xl:min-h-0 xl:gap-3">
         <div className="xl:col-span-2 xl:min-h-0 xl:flex xl:flex-col">
           <DispatchFormsCard className="xl:flex-1 xl:min-h-0" />
         </div>
-        <div className="xl:col-span-3 xl:min-h-0 xl:flex xl:flex-col xl:gap-4">
-          <DailySummaryCard date={date} className="xl:max-h-[min(38%,280px)] xl:shrink-0" />
+        <div className="xl:col-span-3 xl:min-h-0 xl:flex xl:flex-col xl:gap-3">
+          <DailySummaryCard date={date} className="xl:max-h-[160px] xl:shrink-0" />
           <Card className="xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
-            <CardContent className="pt-4 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
+            <CardContent className="pt-3 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
               <Tabs defaultValue="return" className="w-full xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
-                <TabsList className="grid w-full grid-cols-2 shrink-0">
+                <TabsList className="grid w-full grid-cols-2 shrink-0 h-9">
                   <TabsTrigger value="return">Regreso</TabsTrigger>
                   <TabsTrigger value="reconciliation">Reconciliación</TabsTrigger>
                 </TabsList>
-                <TabsContent value="return" className="mt-3 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
+                <TabsContent value="return" className="mt-2 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                   <RouteReturnCard date={date} />
                 </TabsContent>
-                <TabsContent value="reconciliation" className="mt-3 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
+                <TabsContent value="reconciliation" className="mt-2 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                   <ReconciliationCard date={date} />
                 </TabsContent>
               </Tabs>
@@ -273,7 +287,15 @@ function DispatchPage() {
   );
 }
 
-function DispatchDayStats({ date }: { date: string }) {
+function DispatchDayStats({
+  date,
+  compact,
+  className,
+}: {
+  date: string;
+  compact?: boolean;
+  className?: string;
+}) {
   const { branchId } = useBranchScope();
   const listFn = useServerFn(listDispatchesToday);
   const recFn = useServerFn(getTruckReconciliation);
@@ -308,6 +330,59 @@ function DispatchDayStats({ date }: { date: string }) {
   }, [reconciliation]);
 
   const hasReconciliation = (reconciliation?.length ?? 0) > 0;
+
+  if (compact) {
+    const items = [
+      { label: "Despachos", value: String(dispatchStats.count) },
+      {
+        label: "Cargado",
+        value: hasReconciliation ? fmtQty(truckStats.dispatched) : "—",
+      },
+      {
+        label: "Vendido",
+        value: hasReconciliation ? fmtQty(truckStats.sold) : "—",
+      },
+      {
+        label: "Regreso",
+        value: hasReconciliation ? fmtQty(truckStats.actual_returned) : "—",
+        warn: hasReconciliation && truckStats.difference !== 0,
+        hint:
+          hasReconciliation && truckStats.difference !== 0
+            ? `${fmtQty(Math.abs(truckStats.difference))} vs calc.`
+            : undefined,
+      },
+    ];
+
+    return (
+      <div
+        className={cn(
+          "flex items-stretch divide-x rounded-lg border bg-card overflow-hidden",
+          className,
+        )}
+      >
+        {items.map((item) => (
+          <div key={item.label} className="flex-1 min-w-0 px-5 py-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground truncate">
+              {item.label}
+            </div>
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              <span
+                className={cn(
+                  "text-lg font-semibold tabular-nums truncate",
+                  item.warn && "text-destructive",
+                )}
+              >
+                {item.value}
+              </span>
+              {item.hint && (
+                <span className="text-xs text-destructive tabular-nums truncate">{item.hint}</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <StatGrid columns={4}>
@@ -477,6 +552,33 @@ function LocationGateSettings({ role }: { role: string | undefined }) {
 }
 
 
+function BranchSettingsPanel({ role }: { role: string | undefined }) {
+  return (
+    <div className="space-y-2">
+      <DispatchGateSettings role={role} />
+      <LocationGateSettings role={role} />
+    </div>
+  );
+}
+
+function BranchSettingsPopover({ role }: { role: string | undefined }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" aria-label="Configuración de sucursal">
+          <Icon icon={Settings02Icon} className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(24rem,calc(100vw-2rem))] p-3" align="end">
+        <p className="text-sm font-medium mb-2">Configuración de sucursal</p>
+        <BranchSettingsPanel role={role} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function BranchSettingsCollapsible({ role }: { role: string | undefined }) {
   const [open, setOpen] = useState(false);
 
@@ -495,8 +597,7 @@ function BranchSettingsCollapsible({ role }: { role: string | undefined }) {
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-2 pt-2">
-        <DispatchGateSettings role={role} />
-        <LocationGateSettings role={role} />
+        <BranchSettingsPanel role={role} />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -505,12 +606,12 @@ function BranchSettingsCollapsible({ role }: { role: string | undefined }) {
 function DispatchFormsCard({ className }: { className?: string }) {
   return (
     <Card className={cn("relative overflow-visible xl:overflow-hidden xl:flex xl:flex-col xl:min-h-0", className)}>
-      <CardHeader className="py-3 pb-0 shrink-0">
+      <CardHeader className="py-3 pb-0 shrink-0 xl:py-2">
         <div className="flex items-center gap-2">
           <Icon icon={TruckDeliveryIcon} className="h-5 w-5 text-primary" />
           <CardTitle className="text-base">Registrar carga</CardTitle>
         </div>
-        <CardDescription className="text-xs">
+        <CardDescription className="text-xs xl:hidden">
           Despacho de ruta o entrega a repartidor de otra sucursal.
         </CardDescription>
       </CardHeader>
@@ -924,7 +1025,7 @@ function DailySummaryCard({ date, className }: { date: string; className?: strin
 
   return (
     <Card className={cn("relative overflow-visible xl:flex xl:flex-col xl:min-h-0", className)}>
-      <CardHeader className="py-3 shrink-0">
+      <CardHeader className="py-3 shrink-0 xl:py-2 xl:pb-1">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-base">Despachos del día</CardTitle>
           {!isLoading && routeGroups.length > 0 && (
