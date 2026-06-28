@@ -263,15 +263,18 @@ function DispatchPage() {
         <div className="xl:col-span-2 xl:min-h-0 xl:flex xl:flex-col">
           <DispatchFormsCard className="xl:flex-1 xl:min-h-0" />
         </div>
-        <div className="xl:col-span-3 xl:min-h-0 xl:flex xl:flex-col xl:gap-3">
-          <DailySummaryCard date={date} className="xl:max-h-[160px] xl:shrink-0" />
+        <div className="xl:col-span-3 xl:min-h-0 xl:flex xl:flex-col">
           <Card className="xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
             <CardContent className="pt-3 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col">
-              <Tabs defaultValue="return" className="w-full xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
-                <TabsList className="grid w-full grid-cols-2 shrink-0 h-9">
+              <Tabs defaultValue="dispatches" className="w-full xl:flex xl:flex-1 xl:flex-col xl:min-h-0">
+                <TabsList className="grid w-full grid-cols-3 shrink-0 h-9">
+                  <TabsTrigger value="dispatches">Despachos</TabsTrigger>
                   <TabsTrigger value="return">Regreso</TabsTrigger>
                   <TabsTrigger value="reconciliation">Reconciliación</TabsTrigger>
                 </TabsList>
+                <TabsContent value="dispatches" className="mt-2 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
+                  <DailySummaryPanel date={date} />
+                </TabsContent>
                 <TabsContent value="return" className="mt-2 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                   <RouteReturnCard date={date} />
                 </TabsContent>
@@ -997,7 +1000,7 @@ function NewDispatchForm() {
   );
 }
 
-function DailySummaryCard({ date, className }: { date: string; className?: string }) {
+function DailySummaryPanel({ date }: { date: string }) {
   const { branchId } = useBranchScope();
   const listFn = useServerFn(listDispatchesToday);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -1024,95 +1027,93 @@ function DailySummaryCard({ date, className }: { date: string; className?: strin
   );
 
   return (
-    <Card className={cn("relative overflow-visible xl:flex xl:flex-col xl:min-h-0", className)}>
-      <CardHeader className="py-3 shrink-0 xl:py-2 xl:pb-1">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base">Despachos del día</CardTitle>
-          {!isLoading && routeGroups.length > 0 && (
-            <div className="text-xs tabular-nums text-muted-foreground text-right shrink-0">
-              {routeGroups.length} {routeGroups.length === 1 ? "ruta" : "rutas"} ·{" "}
-              {fmtQty(branchTotals.units)} u
-            </div>
-          )}
+    <>
+      {!isLoading && routeGroups.length > 0 && (
+        <div className="mb-3 text-xs tabular-nums text-muted-foreground">
+          {routeGroups.length} {routeGroups.length === 1 ? "ruta" : "rutas"} ·{" "}
+          {branchTotals.dispatches}{" "}
+          {branchTotals.dispatches === 1 ? "despacho" : "despachos"} ·{" "}
+          <span className="font-medium text-foreground">{fmtQty(branchTotals.units)} u</span>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-2 pt-0 xl:flex-1 xl:min-h-0 xl:flex xl:flex-col xl:overflow-hidden">
-        <div className="space-y-2 max-h-[360px] overflow-y-auto xl:max-h-none xl:flex-1 xl:min-h-0">
-          {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-          {!isLoading && routeGroups.length === 0 && (
-            <p className="text-sm text-muted-foreground">Sin despachos en esta fecha.</p>
-          )}
-          {routeGroups.map((group) => (
-            <Collapsible key={group.key} defaultOpen={singleGroup}>
-              <div className="rounded-xl border overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex w-full items-start gap-2 px-3 py-2.5 text-left bg-muted/30 hover:bg-muted/45 transition-colors"
-                  >
-                    <Icon
-                      icon={ArrowDown01Icon}
-                      className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm truncate">
-                        {group.route_name ?? "Ruta"}
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {group.driver_name ?? "—"}
-                      </div>
-                      <div className="mt-1 text-xs tabular-nums text-muted-foreground">
-                        {group.dispatch_count}{" "}
-                        {group.dispatch_count === 1 ? "despacho" : "despachos"} ·{" "}
-                        {group.total_lines} {group.total_lines === 1 ? "línea" : "líneas"} ·{" "}
-                        <span className="font-medium text-foreground">{fmtQty(group.total_units)} u</span>
-                      </div>
+      )}
+
+      <div className="space-y-2">
+        {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
+        {!isLoading && routeGroups.length === 0 && (
+          <p className="text-sm text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center">
+            Sin despachos en esta fecha.
+          </p>
+        )}
+        {routeGroups.map((group) => (
+          <Collapsible key={group.key} defaultOpen={singleGroup}>
+            <div className="rounded-xl border overflow-hidden">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-start gap-2 px-3 py-2.5 text-left bg-muted/30 hover:bg-muted/45 transition-colors"
+                >
+                  <Icon
+                    icon={ArrowDown01Icon}
+                    className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm truncate">
+                      {group.route_name ?? "Ruta"}
                     </div>
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="divide-y border-t">
-                    {group.dispatches.map((d) => {
-                      const time = new Date(d.dispatched_at).toLocaleTimeString(APP_LOCALE, {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        timeZone: APP_TZ,
-                      });
-                      return (
-                        <div
-                          key={d.id}
-                          className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted/20"
-                        >
-                          <div className="w-12 shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-                            {time}
-                          </div>
-                          <div className="flex-1 min-w-0 text-xs text-muted-foreground">
-                            {d.line_count} {d.line_count === 1 ? "línea" : "líneas"} ·{" "}
-                            <span className="font-medium text-foreground tabular-nums">
-                              {fmtQty(d.total_units)} u
-                            </span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            onClick={() => setOpenId(d.id)}
-                          >
-                            <Icon icon={ViewIcon} className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      );
-                    })}
+                    <div className="text-xs text-muted-foreground truncate">
+                      {group.driver_name ?? "—"}
+                    </div>
+                    <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                      {group.dispatch_count}{" "}
+                      {group.dispatch_count === 1 ? "despacho" : "despachos"} ·{" "}
+                      {group.total_lines} {group.total_lines === 1 ? "línea" : "líneas"} ·{" "}
+                      <span className="font-medium text-foreground">{fmtQty(group.total_units)} u</span>
+                    </div>
                   </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-          ))}
-        </div>
-      </CardContent>
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="divide-y border-t">
+                  {group.dispatches.map((d) => {
+                    const time = new Date(d.dispatched_at).toLocaleTimeString(APP_LOCALE, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: APP_TZ,
+                    });
+                    return (
+                      <div
+                        key={d.id}
+                        className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted/20"
+                      >
+                        <div className="w-12 shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                          {time}
+                        </div>
+                        <div className="flex-1 min-w-0 text-xs text-muted-foreground">
+                          {d.line_count} {d.line_count === 1 ? "línea" : "líneas"} ·{" "}
+                          <span className="font-medium text-foreground tabular-nums">
+                            {fmtQty(d.total_units)} u
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => setOpenId(d.id)}
+                        >
+                          <Icon icon={ViewIcon} className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        ))}
+      </div>
 
       <DispatchDetailDialog id={openId} onClose={() => setOpenId(null)} />
-    </Card>
+    </>
   );
 }
 
