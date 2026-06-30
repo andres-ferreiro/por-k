@@ -215,6 +215,62 @@ export const deleteCustomer = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// Explicitly marks a customer's accumulated pending balance as settled.
+// Sets pending_balance = 0 and marks all carried-over pending payments as paid
+// so the carry-over RPC never picks them up again.
+export const markPendingBalancePaid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ customer_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    // Owner or supervisor only
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId)
+      .in("role", ["owner", "supervisor"]);
+    if (rolesErr) throw new Error(rolesErr.message);
+    if (!roles || roles.length === 0) {
+      throw new Error("Solo el propietario o supervisor puede saldar un saldo pendiente.");
+    }
+
+    // Verify the customer exists and is accessible
+    const { data: customer, error: cErr } = await context.supabase
+      .from("customers")
+      .select("id, pending_balance")
+      .eq("id", data.customer_id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!customer) throw new Error("Cliente no encontrado.");
+
+    if (Number(customer.pending_balance) === 0) {
+      return { ok: true, cleared: 0 };
+    }
+
+    const clearedAmount = Number(customer.pending_balance);
+
+    // Supervisors only have SELECT on payments (no UPDATE policy), so use
+    // supabaseAdmin for the payments UPDATE. Owner has full access, but this
+    // path is safe for both since auth is already verified above.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { error: payErr } = await supabaseAdmin
+      .from("payments")
+      .update({ status: "paid" })
+      .eq("customer_id", data.customer_id)
+      .eq("status", "pending")
+      .eq("carried_over", true);
+    if (payErr) throw new Error(payErr.message);
+
+    // Zero out the pending balance
+    const { error: balErr } = await supabaseAdmin
+      .from("customers")
+      .update({ pending_balance: 0 })
+      .eq("id", data.customer_id);
+    if (balErr) throw new Error(balErr.message);
+
+    return { ok: true, cleared: clearedAmount };
+  });
+
 // Returns a signed upload URL the client can PUT to, plus the future public path.
 export const getCustomerPhotoUploadUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

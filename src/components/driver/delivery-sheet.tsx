@@ -26,6 +26,7 @@ import {
   getCustomerPricedProducts,
   getTodayDeliveryDetail,
   getPhotoViewUrls,
+  settlePendingBalance,
 } from "@/lib/api/driver.functions";
 import { getMyDispatchStock } from "@/lib/api/dispatches.functions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -75,8 +76,12 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const [showNotes, setShowNotes] = useState(false);
   const [keypadFor, setKeypadFor] = useState<{ id: string; type: "sell" | "return"; name: string } | null>(null);
 
+  const [settlePending, setSettlePending] = useState(false);
+  const [settleMethod, setSettleMethod] = useState<Method>("cash");
+
   const qc = useQueryClient();
   const save = useServerFn(saveDeliveryVisit);
+  const settle = useServerFn(settlePendingBalance);
   const getProducts = useServerFn(getCustomerPricedProducts);
   const getDetail = useServerFn(getTodayDeliveryDetail);
   const viewUrls = useServerFn(getPhotoViewUrls);
@@ -127,6 +132,8 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
       setPayStatus("paid");
     }
     setShowPayment(false);
+    setSettlePending(false);
+    setSettleMethod("cash");
     setExistingPhotoUrl(null);
     if (d.delivery?.photo_url) {
       viewUrls({ data: { bucket: "delivery-photos", paths: [d.delivery.photo_url] } })
@@ -181,7 +188,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
         }
       }
 
-      return save({
+      await save({
         data: {
           customer_id: customer.id,
           status,
@@ -195,6 +202,13 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           location,
         },
       });
+
+      // If the driver is settling the pending balance, record it as a separate payment
+      if (settlePending && pendingBalance > 0) {
+        await settle({
+          data: { customer_id: customer.id, method: settleMethod },
+        });
+      }
     },
     onSuccess: () => {
       toast.success("Visita guardada.");
@@ -546,15 +560,49 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           {/* Fixed bottom bar */}
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
             {pendingBalance > 0 && (
-              <div className="flex items-center justify-between mb-2 px-1 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800">
-                <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo pendiente</span>
-                <span className="text-sm font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmt(pendingBalance)}</span>
+              <div className="mb-2 rounded-lg border border-rose-200 dark:border-rose-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setSettlePending((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 bg-rose-50 dark:bg-rose-950/20"
+                >
+                  <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo pendiente</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmt(pendingBalance)}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium transition-colors ${settlePending ? "bg-emerald-600 text-white" : "bg-rose-200 dark:bg-rose-800 text-rose-700 dark:text-rose-300"}`}>
+                      {settlePending ? "Cobrado ✓" : "Cobrar"}
+                    </span>
+                  </div>
+                </button>
+                {settlePending && (
+                  <div className="px-3 pb-2.5 pt-2 border-t border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/10">
+                    <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">Método para el saldo pendiente:</p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {METHODS.map((m) => {
+                        const active = settleMethod === m.value;
+                        return (
+                          <button
+                            key={m.value}
+                            type="button"
+                            onClick={() => setSettleMethod(m.value)}
+                            className={`flex flex-col items-center gap-1 px-1 py-2 rounded-lg border-2 text-[11px] font-medium transition-colors ${
+                              active ? "bg-emerald-600 text-white border-emerald-600" : "border-input bg-background"
+                            }`}
+                          >
+                            <Icon icon={m.icon} className="h-4 w-4" />
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {isDelivered && total > 0 && (
               <div className="flex items-center justify-between mb-2.5 px-1">
                 <span className="text-sm text-muted-foreground">Total a cobrar</span>
-                <span className="text-xl font-bold tabular-nums text-primary">{fmt(total + pendingBalance)}</span>
+                <span className="text-xl font-bold tabular-nums text-primary">{fmt(total + (settlePending ? pendingBalance : 0))}</span>
               </div>
             )}
             <div className="flex gap-2">

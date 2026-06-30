@@ -1,4 +1,4 @@
-import { Add01Icon, Delete02Icon, Download01Icon, Edit01Icon, MapPinIcon, Upload01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, CheckmarkCircle01Icon, Delete02Icon, Download01Icon, Edit01Icon, MapPinIcon, Upload01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -6,7 +6,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import {
   listCustomers, createCustomer, updateCustomer, deleteCustomer, bulkCreateCustomers,
-  getCustomerPhotoUploadUrl, getCustomerPhotoViewUrls,
+  getCustomerPhotoUploadUrl, getCustomerPhotoViewUrls, markPendingBalancePaid,
 } from "@/lib/api/customers.functions";
 import { parseCSV } from "@/lib/csv";
 import { getMyContext } from "@/lib/api/context.functions";
@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 import { toast } from "sonner";
+import { fmtMoney } from "@/lib/format";
 import { StatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { LocationPicker } from "@/components/location-picker";
 import { useBranchScope } from "@/lib/branch-scope";
@@ -100,6 +101,8 @@ function CustomersPage() {
   const { branchId } = useBranchScope();
   const { sortKey, sortDir, toggle, sort } = useSorting("name");
 
+  const [saldando, setSaldando] = useState<Customer | null>(null);
+
   const qc = useQueryClient();
   const del = useServerFn(deleteCustomer);
   const delMut = useMutation({
@@ -112,7 +115,24 @@ function CustomersPage() {
     onError: (e: any) => toast.error(e?.message ?? "Error"),
   });
 
+  const markPaidFn = useServerFn(markPendingBalancePaid);
+  const markPaidMut = useMutation({
+    mutationFn: (customerId: string) => markPaidFn({ data: { customer_id: customerId } }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["admin", "payments"] });
+      toast.success(
+        result.cleared > 0
+          ? `Saldo de ${fmtMoney(result.cleared)} marcado como pagado`
+          : "Saldo saldado",
+      );
+      setSaldando(null);
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Error"),
+  });
+
   const isOwner = ctx?.primaryRole === "owner";
+  const canMarkPaid = ctx?.primaryRole === "owner" || ctx?.primaryRole === "supervisor";
 
   const rows = useMemo(() => {
     let scoped = filterByBranch(customers ?? [], branchId);
@@ -203,9 +223,28 @@ function CustomersPage() {
                       : <span className="text-muted-foreground text-sm">—</span>}
                   </TableCell>
                   <TableCell>
-                    {Number(c.pending_balance ?? 0) > 0
-                      ? <StatusBadge tone="danger" className="tabular-nums normal-case tracking-normal">{Number(c.pending_balance).toLocaleString("es-MX", { style: "currency", currency: "MXN" })}</StatusBadge>
-                      : <span className="text-muted-foreground text-sm">—</span>}
+                    <div className="flex items-center gap-1.5">
+                      {Number(c.pending_balance ?? 0) > 0 ? (
+                        <>
+                          <StatusBadge tone="danger" className="tabular-nums normal-case tracking-normal">
+                            {fmtMoney(Number(c.pending_balance))}
+                          </StatusBadge>
+                          {canMarkPaid && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                              title="Marcar saldo como pagado"
+                              onClick={() => setSaldando(c as Customer)}
+                            >
+                              <Icon icon={CheckmarkCircle01Icon} className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
+                    </div>
                   </TableCell>
                   {isOwner && <TableCell>{c.branch_name ?? "—"}</TableCell>}
                   <TableCell>
@@ -254,6 +293,34 @@ function CustomersPage() {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => deleting && delMut.mutate(deleting.id)}>
               Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!saldando} onOpenChange={(v) => !v && setSaldando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Saldar balance pendiente</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se marcará el saldo pendiente de{" "}
+              <b>{saldando?.name}</b> como pagado.{" "}
+              {saldando && Number(saldando.pending_balance) > 0 && (
+                <>
+                  El monto a saldar es{" "}
+                  <b className="text-foreground">{fmtMoney(Number(saldando.pending_balance))}</b>.{" "}
+                </>
+              )}
+              Los pagos pendientes acumulados quedarán registrados como cobrados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={markPaidMut.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={markPaidMut.isPending}
+              onClick={() => saldando && markPaidMut.mutate(saldando.id)}
+            >
+              {markPaidMut.isPending ? "Procesando…" : "Saldar saldo"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

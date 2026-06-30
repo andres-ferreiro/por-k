@@ -994,6 +994,66 @@ export const createCrossBranchLoad = createServerFn({ method: "POST" })
     return { id: loadId };
   });
 
+// ============ UPDATE DISPATCH (owner only) ============
+
+const updateDispatchSchema = z.object({
+  dispatch_id: z.string().uuid(),
+  notes: z.string().trim().max(500).optional().nullable(),
+  items: z.array(itemSchema).min(1).max(50),
+});
+
+export const updateDispatch = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => {
+    const parsed = updateDispatchSchema.parse(d);
+    const ids = parsed.items.map((i) => i.product_id);
+    if (new Set(ids).size !== ids.length) throw new Error("No repitas productos en las líneas.");
+    return parsed;
+  })
+  .handler(async ({ data, context }) => {
+    // Verify caller is owner
+    const { data: roles, error: rolesErr } = await context.supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId)
+      .eq("role", "owner");
+    if (rolesErr) throw new Error(rolesErr.message);
+    if (!roles || roles.length === 0) throw new Error("Solo el propietario puede editar un despacho.");
+
+    // Fetch and validate the dispatch
+    const { data: dispatch, error: dErr } = await context.supabase
+      .from("dispatches")
+      .select("id, branch_id")
+      .eq("id", data.dispatch_id)
+      .maybeSingle();
+    if (dErr) throw new Error(dErr.message);
+    if (!dispatch) throw new Error("Despacho no encontrado.");
+
+    // Update notes
+    const { error: updErr } = await context.supabase
+      .from("dispatches")
+      .update({ notes: data.notes ?? null })
+      .eq("id", data.dispatch_id);
+    if (updErr) throw new Error(updErr.message);
+
+    // Replace all dispatch items: delete existing, insert new
+    const { error: delErr } = await context.supabase
+      .from("dispatch_items")
+      .delete()
+      .eq("dispatch_id", data.dispatch_id);
+    if (delErr) throw new Error(delErr.message);
+
+    const rows = data.items.map((i) => ({
+      dispatch_id: data.dispatch_id,
+      product_id: i.product_id,
+      quantity: i.quantity,
+    }));
+    const { error: insErr } = await context.supabase.from("dispatch_items").insert(rows);
+    if (insErr) throw new Error(insErr.message);
+
+    return { ok: true };
+  });
+
 export const listCrossBranchLoadsToday = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

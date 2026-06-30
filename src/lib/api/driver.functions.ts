@@ -1154,6 +1154,84 @@ export const confirmPreorderDelivery = createServerFn({ method: "POST" })
     return { ok: true, delivery_id: deliveryId, total };
   });
 
+// ============ SETTLE PENDING BALANCE (driver side) ============
+
+// Called by the driver when they physically collect a customer's pending (carried-over) debt.
+// Records a payment for the outstanding amount, zeroes pending_balance, and marks the
+// original carried-over payments as paid so carry_over_pending_balance won't re-accumulate them.
+export const settlePendingBalance = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      customer_id: z.string().uuid(),
+      method: z.enum(["cash", "transfer", "credit", "other"]),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    const { data: routes, error: rErr } = await supabase
+      .from("routes")
+      .select("id, branch_id")
+      .eq("driver_id", userId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (rErr) throw new Error(rErr.message);
+    const route = (routes ?? [])[0] as any;
+    if (!route) throw new Error("No tienes una ruta asignada.");
+
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, todayStr());
+
+    // Read current pending_balance
+    const { data: customer, error: cErr } = await supabase
+      .from("customers")
+      .select("id, pending_balance")
+      .eq("id", data.customer_id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!customer) throw new Error("Cliente no encontrado.");
+
+    const balance = Number(customer.pending_balance ?? 0);
+    if (balance <= 0) return { ok: true, amount: 0 };
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Record a payment for the settled amount (driver_id = current driver → covered by RLS)
+    const { error: payErr } = await supabase.from("payments").insert({
+      branch_id: route.branch_id,
+      route_id: route.id,
+      customer_id: data.customer_id,
+      driver_id: userId,
+      amount: Number(balance.toFixed(2)),
+      status: "paid",
+      method: data.method,
+      note: "Saldo pendiente saldado",
+    });
+    if (payErr) throw new Error(payErr.message);
+
+    // Mark all carried-over pending payments as paid.
+    // These may belong to other drivers, so use supabaseAdmin to bypass the
+    // "driver_id = auth.uid()" RLS restriction on the payments table.
+    const { error: updErr } = await supabaseAdmin
+      .from("payments")
+      .update({ status: "paid" })
+      .eq("customer_id", data.customer_id)
+      .eq("status", "pending")
+      .eq("carried_over", true);
+    if (updErr) throw new Error(updErr.message);
+
+    // Zero out pending_balance. Drivers have no UPDATE policy on customers,
+    // so use supabaseAdmin here as well.
+    const { error: balErr } = await supabaseAdmin
+      .from("customers")
+      .update({ pending_balance: 0 })
+      .eq("id", data.customer_id);
+    if (balErr) throw new Error(balErr.message);
+
+    return { ok: true, amount: balance };
+  });
+
 // ============ DRIVER LIVE LOCATION ============
 
 export const publishDriverLocation = createServerFn({ method: "POST" })

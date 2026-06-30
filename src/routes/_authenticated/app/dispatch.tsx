@@ -2,6 +2,7 @@ import {
   Add01Icon,
   ArrowDown01Icon,
   Delete02Icon,
+  Edit01Icon,
   SentIcon,
   Settings02Icon,
   TruckDeliveryIcon,
@@ -16,6 +17,7 @@ import {
   listRoutesForDispatch,
   listProductsActive,
   createDispatch,
+  updateDispatch,
   listDispatchesToday,
   getDispatch,
   getTruckReconciliation,
@@ -273,7 +275,7 @@ function DispatchPage() {
                   <TabsTrigger value="reconciliation">Reconciliación</TabsTrigger>
                 </TabsList>
                 <TabsContent value="dispatches" className="mt-2 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
-                  <DailySummaryPanel date={date} />
+                  <DailySummaryPanel date={date} role={role} />
                 </TabsContent>
                 <TabsContent value="return" className="mt-2 xl:flex-1 xl:min-h-0 xl:overflow-y-auto">
                   <RouteReturnCard date={date} />
@@ -1000,7 +1002,7 @@ function NewDispatchForm() {
   );
 }
 
-function DailySummaryPanel({ date }: { date: string }) {
+function DailySummaryPanel({ date, role }: { date: string; role?: string }) {
   const { branchId } = useBranchScope();
   const listFn = useServerFn(listDispatchesToday);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -1112,7 +1114,7 @@ function DailySummaryPanel({ date }: { date: string }) {
         ))}
       </div>
 
-      <DispatchDetailDialog id={openId} onClose={() => setOpenId(null)} />
+      <DispatchDetailDialog id={openId} onClose={() => setOpenId(null)} role={role} />
     </>
   );
 }
@@ -1405,22 +1407,93 @@ function RouteReturnCard({ date }: { date: string }) {
   );
 }
 
-function DispatchDetailDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
+function DispatchDetailDialog({
+  id,
+  onClose,
+  role,
+}: {
+  id: string | null;
+  onClose: () => void;
+  role: string | undefined;
+}) {
+  const qc = useQueryClient();
   const getFn = useServerFn(getDispatch);
+  const productsFn = useServerFn(listProductsActive);
+  const updateFn = useServerFn(updateDispatch);
+
   const { data, isLoading } = useQuery({
     queryKey: ["dispatch", id],
     queryFn: () => getFn({ data: { id: id! } }),
     enabled: !!id,
   });
 
+  const { data: products } = useQuery({
+    queryKey: ["dispatch", "products"],
+    queryFn: () => productsFn(),
+    enabled: role === "owner",
+  });
+
+  const [editing, setEditing] = useState(false);
+  const [editQtyByProduct, setEditQtyByProduct] = useState<Record<string, string>>({});
+  const [editNotes, setEditNotes] = useState("");
+
+  // Initialize edit state when data loads or edit mode opens
+  useEffect(() => {
+    if (!editing || !data || !products) return;
+    const qty: Record<string, string> = {};
+    for (const p of products) qty[p.id] = "";
+    for (const it of data.items) qty[it.product_id] = String(it.quantity);
+    setEditQtyByProduct(qty);
+    setEditNotes(data.notes ?? "");
+  }, [editing, data, products]);
+
+  // Reset edit state when dialog closes
+  useEffect(() => {
+    if (!id) setEditing(false);
+  }, [id]);
+
+  const editMut = useMutation({
+    mutationFn: async () => {
+      if (!id) return;
+      const items = (products ?? [])
+        .filter((p) => editQtyByProduct[p.id] && Number(editQtyByProduct[p.id]) > 0)
+        .map((p) => ({ product_id: p.id, quantity: Number(editQtyByProduct[p.id]) }));
+      if (items.length === 0) throw new Error("Agrega al menos un producto.");
+      return updateFn({
+        data: {
+          dispatch_id: id,
+          notes: editNotes.trim() || null,
+          items,
+        },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Despacho actualizado");
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["dispatch", id] });
+      qc.invalidateQueries({ queryKey: ["dispatches", "today"] });
+      qc.invalidateQueries({ queryKey: ["truck-reconciliation"] });
+      qc.invalidateQueries({ queryKey: ["driver", "dispatchStock"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Error al actualizar"),
+  });
+
   return (
     <Dialog open={!!id} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Detalle del despacho</DialogTitle>
+          <div className="flex items-center justify-between gap-2">
+            <DialogTitle>{editing ? "Editar despacho" : "Detalle del despacho"}</DialogTitle>
+            {role === "owner" && data && !editing && (
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                <Icon icon={Edit01Icon} className="h-3.5 w-3.5 mr-1" />
+                Editar
+              </Button>
+            )}
+          </div>
         </DialogHeader>
         {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
-        {data && (
+        {data && !editing && (
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
@@ -1461,6 +1534,72 @@ function DispatchDetailDialog({ id, onClose }: { id: string | null; onClose: () 
                 <p className="text-sm whitespace-pre-wrap">{data.notes}</p>
               </div>
             )}
+          </div>
+        )}
+        {data && editing && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2">
+              Estás editando un despacho ya registrado. Los cambios actualizarán el stock disponible del repartidor.
+            </p>
+            <div className="space-y-1 max-h-[320px] overflow-y-auto rounded-lg border p-1.5">
+              {(products ?? []).length === 0 && (
+                <p className="text-sm text-muted-foreground py-4 text-center">Cargando productos…</p>
+              )}
+              {(products ?? []).map((p) => (
+                <div
+                  key={p.id}
+                  className={`flex items-center gap-2 rounded-lg border p-2 ${
+                    Number(editQtyByProduct[p.id]) > 0 ? "bg-accent/40 border-primary/40" : ""
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">{p.name}</div>
+                    <div className="text-xs text-muted-foreground">{p.unit}</div>
+                  </div>
+                  <div className="relative w-24 shrink-0">
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                      value={editQtyByProduct[p.id] ?? ""}
+                      onChange={(e) =>
+                        setEditQtyByProduct((prev) => ({ ...prev, [p.id]: e.target.value }))
+                      }
+                      className="text-right tabular-nums pr-8"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notas (opcional)</Label>
+              <Textarea
+                rows={2}
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                maxLength={500}
+                placeholder="Observaciones del despacho"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setEditing(false)}
+                disabled={editMut.isPending}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={() => editMut.mutate()}
+                disabled={editMut.isPending}
+              >
+                {editMut.isPending ? "Guardando…" : "Guardar cambios"}
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>
