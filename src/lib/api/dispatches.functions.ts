@@ -822,8 +822,8 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     return Array.from(groups.values()).map((g) => {
       const products = Array.from(g.products.values()).map((p) => ({
         ...p,
-        on_truck: p.dispatched - p.sold - p.customer_returns,
-        difference: p.actual_returned - (p.dispatched - p.sold - p.customer_returns),
+        on_truck: p.dispatched - p.sold + p.customer_returns,
+        difference: p.actual_returned - (p.dispatched - p.sold + p.customer_returns),
       }));
       products.sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? ""));
       const totals = products.reduce(
