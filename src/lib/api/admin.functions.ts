@@ -1662,3 +1662,44 @@ export const getReturnsReport = createServerFn({ method: "POST" })
       truck_returns: truckReturns,
     };
   });
+
+// ============ DELIVERY PHOTOS ============
+
+export const getDeliveryPhotos = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      branch_id: branchIdField,
+      date_from: dateStr,
+      date_to: dateStr,
+      customer_id: z.string().uuid().optional().nullable(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    let q = supabase
+      .from("deliveries")
+      .select("id, delivery_date, customer_id, photo_url, customers(name)")
+      .eq("status", "delivered")
+      .not("photo_url", "is", null)
+      .gte("delivery_date", data.date_from)
+      .lte("delivery_date", data.date_to)
+      .order("delivery_date", { ascending: false })
+      .order("customer_id", { ascending: true })
+      .limit(500);
+
+    if (data.branch_id) q = q.eq("branch_id", data.branch_id);
+    if (data.customer_id) q = q.eq("customer_id", data.customer_id);
+
+    const { data: rows, error } = await q;
+    if (error) throw new Error(error.message);
+
+    return (rows ?? []).map((r: any) => ({
+      delivery_id: r.id as string,
+      delivery_date: r.delivery_date as string,
+      customer_id: r.customer_id as string,
+      customer_name: (r.customers?.name ?? "") as string,
+      photo_url: r.photo_url as string,
+    }));
+  });
