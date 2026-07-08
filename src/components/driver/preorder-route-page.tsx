@@ -2,6 +2,7 @@ import {
   CancelCircleIcon,
   CheckmarkCircle02Icon,
   Clock01Icon,
+  DeliveryTruck02Icon,
   Loading03Icon,
   MapPinIcon,
   PackageDelivered01Icon,
@@ -11,12 +12,16 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { Card, CardContent } from "@/components/ui/card";
 import { deliveryStatusTone } from "@/lib/badge-tones";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PreorderDeliverySheet } from "@/components/driver/preorder-delivery-sheet";
+import { PreorderReportDialog } from "@/components/preorders/preorder-report-dialog";
+import { getMyPreorderOrdersForReport } from "@/lib/api/driver.functions";
 
 const fmt = (n: number) => n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
 
@@ -53,6 +58,15 @@ function statusMeta(status?: "pending" | "delivered" | "failed" | null, hasOrder
 export function PreorderRoutePage({ data }: { data: RouteData }) {
   const [deliveryFor, setDeliveryFor] = useState<RouteData["customers"][number] | null>(null);
   const [search, setSearch] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+
+  const getOrdersFn = useServerFn(getMyPreorderOrdersForReport);
+  const ordersQ = useQuery({
+    queryKey: ["driver", "preorderReportOrders", data.route.id, data.date],
+    queryFn: () => getOrdersFn({ data: { route_id: data.route.id, date: data.date } }),
+    enabled: reportOpen,
+    staleTime: 60_000,
+  });
 
   const total = data.customers.length;
   const done = data.customers.filter((c) => c.delivery && c.delivery.status !== "pending").length;
@@ -68,10 +82,21 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{dateLabel}</div>
-        <h1>{data.route.name}</h1>
-        <p className="text-sm text-muted-foreground">Ruta de pedidos · Hoteles y restaurantes</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{dateLabel}</div>
+          <h1>{data.route.name}</h1>
+          <p className="text-sm text-muted-foreground">Ruta de pedidos · Hoteles y restaurantes</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 mt-1"
+          onClick={() => setReportOpen(true)}
+        >
+          <Icon icon={DeliveryTruck02Icon} className="h-4 w-4 mr-1" />
+          Ver carga
+        </Button>
       </div>
 
       <Card>
@@ -180,6 +205,14 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
         open={!!deliveryFor}
         onOpenChange={(o) => !o && setDeliveryFor(null)}
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
+      />
+
+      <PreorderReportDialog
+        open={reportOpen}
+        onOpenChange={setReportOpen}
+        orders={ordersQ.data ?? []}
+        branchName={data.route.branch_name ?? data.route.name}
+        deliveryDate={data.date}
       />
     </div>
   );

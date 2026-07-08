@@ -1274,3 +1274,51 @@ export const publishDriverLocation = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+// ============ PREORDER TRUCK REPORT (driver-accessible) ============
+
+export const getMyPreorderOrdersForReport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      route_id: z.string().uuid(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    // Verify the driver is assigned to this route
+    const { data: route, error: rErr } = await supabase
+      .from("routes")
+      .select("id, name, branch_id")
+      .eq("id", data.route_id)
+      .eq("driver_id", userId)
+      .maybeSingle();
+    if (rErr) throw new Error(rErr.message);
+    if (!route) throw new Error("No tienes acceso a esta ruta.");
+
+    const { data: orders, error: oErr } = await supabase
+      .from("customer_orders")
+      .select(`
+        id, customer_id, status,
+        customers(name),
+        customer_order_items(product_id, quantity, products(name, unit))
+      `)
+      .eq("route_id", data.route_id)
+      .eq("delivery_date", data.date)
+      .neq("status", "cancelled");
+    if (oErr) throw new Error(oErr.message);
+
+    return (orders ?? []).map((o: any) => ({
+      id: o.id as string,
+      customer_name: (o.customers?.name ?? "") as string,
+      status: o.status as string,
+      items: ((o.customer_order_items ?? []) as any[]).map((i) => ({
+        product_id: i.product_id as string,
+        product_name: (i.products?.name ?? "") as string,
+        unit: (i.products?.unit ?? "") as string,
+        quantity: Number(i.quantity),
+      })),
+    }));
+  });
