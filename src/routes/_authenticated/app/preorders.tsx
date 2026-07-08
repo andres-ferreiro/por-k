@@ -1,4 +1,4 @@
-import { Add01Icon, Cancel01Icon, Edit01Icon, Package01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, Cancel01Icon, DeliveryTruck02Icon, Edit01Icon, Package01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +31,7 @@ import { toast } from "sonner";
 import {
   PageHeader, TableToolbar, DataTableCard, TableStatusRow, TablePagination,
 } from "@/components/admin/data-table";
+import { PreorderReportDialog } from "@/components/preorders/preorder-report-dialog";
 import { StatGrid, StatCardSimple } from "@/components/admin/stat-cards";
 
 export const Route = createFileRoute("/_authenticated/app/preorders")({
@@ -66,6 +67,7 @@ function PreordersPage() {
   const [deliveryDate, setDeliveryDate] = useState(tomorrow);
   const [search, setSearch] = useState("");
   const [orderFor, setOrderFor] = useState<{ id: string; name: string; category: string } | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const getRouteInfo = useServerFn(getPreorderRouteInfo);
   const listCustomers = useServerFn(listPreorderCustomers);
@@ -113,6 +115,11 @@ function PreordersPage() {
     return { total, withOrder, pending: total - withOrder, orderTotal };
   }, [rows, orderMap, ordersQ.data]);
 
+  const confirmedCount = useMemo(
+    () => (ordersQ.data ?? []).filter((o) => o.status === "confirmed").length,
+    [ordersQ.data],
+  );
+
   const pagination = usePagination(rows, undefined, [search, deliveryDate]);
 
   if (!branchId) {
@@ -155,7 +162,7 @@ function PreordersPage() {
         description={`Ruta: ${routeInfoQ.data.route?.name ?? "—"} · Hoteles y restaurantes`}
       />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 items-center">
         <Button
           variant={deliveryDate === today ? "default" : "outline"}
           size="sm"
@@ -176,6 +183,17 @@ function PreordersPage() {
           onChange={(e) => setDeliveryDate(e.target.value)}
           className="w-auto"
         />
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setReportOpen(true)}
+          disabled={confirmedCount === 0}
+          title={confirmedCount === 0 ? "Sin pedidos confirmados para esta fecha" : "Ver reporte de carga"}
+        >
+          <Icon icon={DeliveryTruck02Icon} className="h-4 w-4 mr-1" />
+          Reporte
+        </Button>
       </div>
 
       <StatGrid>
@@ -287,6 +305,14 @@ function PreordersPage() {
         branchId={branchId}
         routeDriverId={routeInfoQ.data?.route?.driver_id ?? null}
         existingOrder={orderFor ? orderMap.get(orderFor.id) : undefined}
+      />
+
+      <PreorderReportDialog
+        open={reportOpen}
+        onOpenChange={setReportOpen}
+        orders={ordersQ.data ?? []}
+        branchName={routeInfoQ.data?.route?.name ?? "Sucursal"}
+        deliveryDate={deliveryDate}
       />
     </div>
   );
