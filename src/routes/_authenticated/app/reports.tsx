@@ -29,6 +29,7 @@ import {
   PageHeader, TableToolbar, DataTableCard, FilterSelect, FilterDateRangePicker,
   TablePagination,
 } from "@/components/admin/data-table";
+import { DeliveryPhotosTab } from "@/components/reports/delivery-photos-tab";
 
 export const Route = createFileRoute("/_authenticated/app/reports")({
   loader: async ({ context }) => {
@@ -136,6 +137,7 @@ function ReportsPage() {
             <TabsTrigger value="customers">Por cliente</TabsTrigger>
             <TabsTrigger value="efficiency">Eficiencia rutas</TabsTrigger>
             <TabsTrigger value="returns">Devoluciones</TabsTrigger>
+            <TabsTrigger value="photos">Fotos</TabsTrigger>
           </TabsList>
         </div>
         <TabsContent value="products"><ByProduct filters={filters} /></TabsContent>
@@ -143,6 +145,7 @@ function ReportsPage() {
         <TabsContent value="customers"><ByCustomer filters={filters} /></TabsContent>
         <TabsContent value="efficiency"><ByRouteEfficiency filters={filters} /></TabsContent>
         <TabsContent value="returns"><ReturnsReport filters={filters} /></TabsContent>
+        <TabsContent value="photos"><DeliveryPhotosTab filters={filters} /></TabsContent>
       </Tabs>
     </div>
   );
