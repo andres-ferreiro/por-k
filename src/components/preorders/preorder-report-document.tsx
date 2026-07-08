@@ -1,4 +1,4 @@
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 
 export type ProductTotal = {
   product_id: string;
@@ -24,10 +24,10 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 4,
   },
-  brandText: {
-    fontSize: 16,
-    fontFamily: "Helvetica-Bold",
-    color: "#111",
+  logo: {
+    width: 52,
+    height: 52,
+    objectFit: "contain",
   },
   branchText: {
     fontSize: 10,
@@ -145,7 +145,7 @@ export function PreorderReportDocument({
       <Page size="A4" style={styles.page}>
         {/* Header */}
         <View style={styles.headerRow}>
-          <Text style={styles.brandText}>RUTA DULCE</Text>
+          <Image style={styles.logo} src="/pork-logo.png" />
           <Text style={styles.branchText}>{branchName}</Text>
         </View>
         <Text style={styles.reportTitle}>Reporte de carga para camión</Text>
