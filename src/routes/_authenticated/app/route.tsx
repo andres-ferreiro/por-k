@@ -162,7 +162,7 @@ function AdminShell() {
   }
 
   return (
-    <BranchScopeProvider>
+    <BranchScopeProvider defaultBranchId={ctx.branchId}>
     <SidebarProvider>
         <Sidebar collapsible="icon">
           <SidebarContent className="px-2 group-data-[collapsible=icon]:px-0">
@@ -209,7 +209,7 @@ function AdminShell() {
             <SidebarTrigger className="-ml-1 text-muted-foreground" />
             <Separator orientation="vertical" className="mr-1 h-4" />
             <div className="min-w-0 flex-1">
-              <BranchSwitcher roles={ctx.roles} ownBranchName={ctx.branchName} />
+              <BranchSwitcher roles={ctx.roles} ownBranchId={ctx.branchId} ownBranchName={ctx.branchName} />
             </div>
             <UserMenu ctx={ctx} onSignOut={handleSignOut} />
           </header>

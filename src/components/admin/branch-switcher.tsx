@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Building03Icon } from "@hugeicons/core-free-icons";
@@ -13,13 +14,23 @@ const ALL = "__all__";
 
 export function BranchSwitcher({
   roles,
+  ownBranchId,
   ownBranchName,
 }: {
   roles: AppRole[];
+  ownBranchId: string | null;
   ownBranchName: string | null;
 }) {
   const isOwner = roles.includes("owner");
   const { branchId, setBranchId } = useBranchScope();
+
+  // For non-owners, lock the scope to their assigned branch, overriding any
+  // stale localStorage value that could be left from a previous owner session.
+  useEffect(() => {
+    if (!isOwner && ownBranchId) {
+      setBranchId(ownBranchId);
+    }
+  }, [isOwner, ownBranchId, setBranchId]);
 
   const fn = useServerFn(listBranches);
   const { data: branches } = useQuery({
