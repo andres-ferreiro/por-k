@@ -263,13 +263,14 @@ export function LocationDrawer({ open, onOpenChange, branchId, customer, canWrit
                   value={photoPath}
                   onChange={setPhotoPath}
                   previewUrl={existingPhotoUrl}
+                  previewFit="contain"
                   label="Foto de la fachada o punto de referencia"
                 />
               ) : existingPhotoUrl ? (
                 <img
                   src={existingPhotoUrl}
                   alt="Referencia del cliente"
-                  className="w-full rounded-lg max-h-80 object-cover border"
+                  className="block w-full h-auto rounded-lg border"
                 />
               ) : (
                 <p className="text-sm text-center text-muted-foreground py-8">

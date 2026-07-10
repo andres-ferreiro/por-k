@@ -16,6 +16,7 @@ interface PhotoCaptureProps {
   onChange: (path: string | null) => void;
   label?: string;
   previewUrl?: string | null;
+  previewFit?: "cover" | "contain";
 }
 
 interface CustomerPhotoCaptureProps {
@@ -25,12 +26,13 @@ interface CustomerPhotoCaptureProps {
   onChange: (path: string | null) => void;
   label?: string;
   previewUrl?: string | null;
+  previewFit?: "cover" | "contain";
 }
 
 type Props = PhotoCaptureProps | CustomerPhotoCaptureProps;
 
 export function PhotoCapture(props: Props) {
-  const { value, onChange, label, previewUrl } = props;
+  const { value, onChange, label, previewUrl, previewFit = "cover" } = props;
   const bucket = props.bucket;
   const branchId = props.bucket === "customer-photos" ? props.branchId : undefined;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -102,7 +104,11 @@ export function PhotoCapture(props: Props) {
           <img
             src={displayPreview}
             alt="Evidencia"
-            className="w-full rounded-md max-h-64 object-cover border"
+            className={
+              previewFit === "contain"
+                ? "block w-full h-auto rounded-md border"
+                : "w-full rounded-md max-h-64 object-cover border"
+            }
           />
           <button
             type="button"
