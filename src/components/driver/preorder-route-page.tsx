@@ -20,7 +20,7 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PreorderDeliverySheet } from "@/components/driver/preorder-delivery-sheet";
-import { PreorderReportDialog } from "@/components/preorders/preorder-report-dialog";
+import { DriverLoadDialog } from "@/components/driver/driver-load-dialog";
 import { getMyPreorderOrdersForReport } from "@/lib/api/driver.functions";
 
 const fmt = (n: number) => n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
@@ -207,12 +207,13 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
       />
 
-      <PreorderReportDialog
+      <DriverLoadDialog
         open={reportOpen}
         onOpenChange={setReportOpen}
         orders={ordersQ.data ?? []}
-        branchName={data.route.branch_name ?? data.route.name}
+        routeCustomers={data.customers.map((c) => ({ id: c.id, name: c.name, category: c.category }))}
         deliveryDate={data.date}
+        loading={ordersQ.isLoading}
       />
     </div>
   );

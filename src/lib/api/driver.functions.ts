@@ -1302,7 +1302,7 @@ export const getMyPreorderOrdersForReport = createServerFn({ method: "POST" })
       .from("customer_orders")
       .select(`
         id, customer_id, status,
-        customers(name),
+        customers(name, category),
         customer_order_items(product_id, quantity, products(name, unit))
       `)
       .eq("route_id", data.route_id)
@@ -1312,7 +1312,9 @@ export const getMyPreorderOrdersForReport = createServerFn({ method: "POST" })
 
     return (orders ?? []).map((o: any) => ({
       id: o.id as string,
+      customer_id: o.customer_id as string,
       customer_name: (o.customers?.name ?? "") as string,
+      customer_category: (o.customers?.category ?? "hotel") as string,
       status: o.status as string,
       items: ((o.customer_order_items ?? []) as any[]).map((i) => ({
         product_id: i.product_id as string,

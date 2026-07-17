@@ -1635,7 +1635,7 @@ function ReconciliationCard({ date }: { date: string }) {
     <Card className="relative overflow-visible border-0 shadow-none bg-transparent p-0">
       <CardContent className="space-y-4 p-0">
         <p className="text-xs text-muted-foreground">
-          Compara lo calculado (cargado − vendido − dev. clientes) con lo registrado en el regreso.
+          Compara lo calculado (cargado − vendido) con lo registrado en el regreso. Dev. clientes se muestra por referencia y no se incluye en el cálculo.
         </p>
 
         {isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}

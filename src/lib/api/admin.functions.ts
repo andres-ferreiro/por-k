@@ -16,6 +16,30 @@ import { computeRouteEfficiency, type EfficiencyStop } from "@/lib/route-efficie
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
 const branchIdField = z.string().uuid().optional().nullable();
+const routeModeField = z.enum(["dispatch", "preorder"]).optional().nullable();
+
+const EMPTY_ROUTE_ID = "00000000-0000-0000-0000-000000000000";
+
+async function routeIdsForMode(
+  supabase: { from: (table: string) => any },
+  branchId: string | null,
+  mode: "dispatch" | "preorder",
+): Promise<string[]> {
+  let q = supabase.from("routes").select("id").eq("route_mode", mode);
+  if (branchId) q = q.eq("branch_id", branchId);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r: { id: string }) => r.id);
+}
+
+function applyRouteIdsFilter<T extends { in: (col: string, ids: string[]) => T }>(
+  query: T,
+  routeIds: string[] | null | undefined,
+  column = "route_id",
+): T {
+  if (routeIds == null) return query;
+  return query.in(column, routeIds.length > 0 ? routeIds : [EMPTY_ROUTE_ID]);
+}
 
 async function fetchProfileNames(ids: string[]): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
@@ -36,6 +60,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       date_from: dateStr.optional().nullable(),
       date_to: dateStr.optional().nullable(),
       branch_id: branchIdField,
+      route_mode: routeModeField,
     }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {
@@ -46,6 +71,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     const { startISO } = tzDayRange(dateFrom);
     const { endISO } = tzDayRange(dateTo);
     const bid = data.branch_id ?? null;
+    const routeMode = data.route_mode ?? null;
+    const routeIds = routeMode ? await routeIdsForMode(supabase, bid, routeMode) : null;
 
     let dq = supabase
       .from("dispatches")
@@ -53,6 +80,11 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       .gte("dispatched_at", startISO)
       .lt("dispatched_at", endISO);
     if (bid) dq = dq.eq("branch_id", bid);
+    if (routeMode === "preorder") {
+      dq = dq.in("route_id", [EMPTY_ROUTE_ID]);
+    } else {
+      dq = applyRouteIdsFilter(dq, routeIds);
+    }
 
     let delq = supabase
       .from("deliveries")
@@ -62,6 +94,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       .gte("delivery_date", dateFrom)
       .lte("delivery_date", dateTo);
     if (bid) delq = delq.eq("branch_id", bid);
+    delq = applyRouteIdsFilter(delq, routeIds);
 
     let pq = supabase
       .from("payments")
@@ -69,6 +102,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       .gte("paid_at", startISO)
       .lt("paid_at", endISO);
     if (bid) pq = pq.eq("branch_id", bid);
+    pq = applyRouteIdsFilter(pq, routeIds);
 
     let eq = supabase
       .from("expenses")
@@ -76,6 +110,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       .gte("expense_date", dateFrom)
       .lte("expense_date", dateTo);
     if (bid) eq = eq.eq("branch_id", bid);
+    eq = applyRouteIdsFilter(eq, routeIds);
 
     const [dispatchesRes, deliveriesRes, paymentsRes, expensesRes] = await Promise.all([
       dq, delq, pq, eq,
@@ -332,13 +367,20 @@ function buildTrendSpine(
 export const getDashboardTrend = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
-    z.object({ date_from: dateStr, date_to: dateStr, branch_id: branchIdField }).parse(d ?? {}),
+    z.object({
+      date_from: dateStr,
+      date_to: dateStr,
+      branch_id: branchIdField,
+      route_mode: routeModeField,
+    }).parse(d ?? {}),
   )
   .handler(async ({ data, context }): Promise<DashboardTrend> => {
     const { supabase } = context;
     const { startISO } = tzDayRange(data.date_from);
     const { endISO } = tzDayRange(data.date_to);
     const bid = data.branch_id ?? null;
+    const routeMode = data.route_mode ?? null;
+    const routeIds = routeMode ? await routeIdsForMode(supabase, bid, routeMode) : null;
     const granularity = trendGranularity(data.date_from, data.date_to);
     const spine = buildTrendSpine(granularity, data.date_from, data.date_to);
 
@@ -359,6 +401,11 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
       .gte("dispatched_at", startISO)
       .lt("dispatched_at", endISO);
     if (bid) dispQ = dispQ.eq("branch_id", bid);
+    if (routeMode === "preorder") {
+      dispQ = dispQ.in("route_id", [EMPTY_ROUTE_ID]);
+    } else {
+      dispQ = applyRouteIdsFilter(dispQ, routeIds);
+    }
 
     let delQ = supabase
       .from("deliveries")
@@ -368,6 +415,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to);
     if (bid) delQ = delQ.eq("branch_id", bid);
+    delQ = applyRouteIdsFilter(delQ, routeIds);
 
     let payQ = supabase
       .from("payments")
@@ -375,6 +423,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
       .gte("paid_at", startISO)
       .lt("paid_at", endISO);
     if (bid) payQ = payQ.eq("branch_id", bid);
+    payQ = applyRouteIdsFilter(payQ, routeIds);
 
     let pendQ = supabase
       .from("payments")
@@ -383,6 +432,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
       .lt("created_at", endISO)
       .eq("status", "pending");
     if (bid) pendQ = pendQ.eq("branch_id", bid);
+    pendQ = applyRouteIdsFilter(pendQ, routeIds);
 
     let expQ = supabase
       .from("expenses")
@@ -390,6 +440,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
       .gte("expense_date", data.date_from)
       .lte("expense_date", data.date_to);
     if (bid) expQ = expQ.eq("branch_id", bid);
+    expQ = applyRouteIdsFilter(expQ, routeIds);
 
     const [dispRes, delRes, payRes, pendRes, expRes] = await Promise.all([
       dispQ, delQ, payQ, pendQ, expQ,
@@ -497,6 +548,7 @@ const dateRangeSchema = z.object({
   route_id: z.string().uuid().optional().nullable(),
   driver_id: z.string().uuid().optional().nullable(),
   branch_id: branchIdField,
+  route_mode: routeModeField,
 });
 
 export const listDeliveriesAdmin = createServerFn({ method: "POST" })
@@ -757,6 +809,9 @@ export const reportSalesByProduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => dateRangeSchema.parse(d))
   .handler(async ({ data, context }) => {
+    const routeIds = data.route_mode && !data.route_id
+      ? await routeIdsForMode(context.supabase, data.branch_id ?? null, data.route_mode)
+      : null;
     let dq = context.supabase
       .from("deliveries")
       .select(
@@ -767,6 +822,7 @@ export const reportSalesByProduct = createServerFn({ method: "POST" })
       .lte("delivery_date", data.date_to);
     if (data.branch_id) dq = dq.eq("branch_id", data.branch_id);
     if (data.route_id) dq = dq.eq("route_id", data.route_id);
+    else dq = applyRouteIdsFilter(dq, routeIds);
     if (data.driver_id) dq = dq.eq("driver_id", data.driver_id);
 
     const { data: dels, error } = await dq;
@@ -817,6 +873,9 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
     const { startISO } = tzDayRange(data.date_from);
     const { endISO } = tzDayRange(data.date_to);
     const bid = data.branch_id ?? null;
+    const routeIds = data.route_mode && !data.route_id
+      ? await routeIdsForMode(context.supabase, bid, data.route_mode)
+      : null;
     let delQ = context.supabase
       .from("deliveries")
       .select(
@@ -827,6 +886,7 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
       .eq("status", "delivered");
     if (bid) delQ = delQ.eq("branch_id", bid);
     if (data.route_id) delQ = delQ.eq("route_id", data.route_id);
+    else delQ = applyRouteIdsFilter(delQ, routeIds);
     if (data.driver_id) delQ = delQ.eq("driver_id", data.driver_id);
 
     let payQ = context.supabase
@@ -836,6 +896,7 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
       .lt("paid_at", endISO);
     if (bid) payQ = payQ.eq("branch_id", bid);
     if (data.route_id) payQ = payQ.eq("route_id", data.route_id);
+    else payQ = applyRouteIdsFilter(payQ, routeIds);
     if (data.driver_id) payQ = payQ.eq("driver_id", data.driver_id);
 
     let expQ = context.supabase
@@ -845,6 +906,7 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
       .lte("expense_date", data.date_to);
     if (bid) expQ = expQ.eq("branch_id", bid);
     if (data.route_id) expQ = expQ.eq("route_id", data.route_id);
+    else expQ = applyRouteIdsFilter(expQ, routeIds);
     if (data.driver_id) expQ = expQ.eq("driver_id", data.driver_id);
 
     const [delsRes, paysRes, expsRes] = await Promise.all([delQ, payQ, expQ]);
@@ -1148,6 +1210,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
     type StopRow = {
       route_id: string;
       route_name: string;
+      is_preorder: boolean;
       driver_id: string | null;
       driver_name: string | null;
       position: number;
@@ -1188,6 +1251,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       stops.push({
         route_id: rc.route_id as string,
         route_name: route.name as string,
+        is_preorder: route.route_mode === "preorder",
         driver_id: (route.driver_id as string | null) ?? null,
         driver_name: route.driver_id ? names.get(route.driver_id as string) ?? null : null,
         position: rc.position as number,

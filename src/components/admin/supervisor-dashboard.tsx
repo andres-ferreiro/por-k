@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period";
 import { useBranchScope } from "@/lib/branch-scope";
 import { PeriodPicker } from "@/components/admin/period-picker";
 import { StatCardArea, StatCardSimple } from "@/components/admin/stat-cards";
+import { DashboardDriverSegments } from "@/components/admin/dashboard-driver-segments";
+import { DashboardRouteFilter } from "@/components/admin/dashboard-route-filter";
 import { PageHeader } from "@/components/admin/data-table";
+import { useDashboardChannel } from "@/hooks/use-dashboard-channel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import {
@@ -23,7 +25,6 @@ import {
 } from "@/lib/api/admin.functions";
 import { trendLabels, trendSeries } from "@/lib/dashboard-trend";
 import { fmtMoney } from "@/lib/format";
-import { cn } from "@/lib/utils";
 
 // ─── chart constants ──────────────────────────────────────────────────────────
 
@@ -38,17 +39,11 @@ const deliveryOutcomesConfig: ChartConfig = {
   Pendiente: { label: "Pendiente", color: C4 },
 };
 
-const driverComparisonConfig: ChartConfig = {
-  Vendido: { label: "Vendido", color: C1 },
-  Cobrado: { label: "Cobrado", color: C2 },
-};
-
-const moneyFmt = (v: unknown) => [fmtMoney(Number(v)), ""] as [string, string];
-
 // ─── main component ──────────────────────────────────────────────────────────
 
 export function SupervisorDashboard() {
   const { branchId } = useBranchScope();
+  const { channel, setChannel, routeMode } = useDashboardChannel();
   const {
     period,
     setPeriod,
@@ -65,51 +60,70 @@ export function SupervisorDashboard() {
 
   // ── queries (all parallel) ────────────────────────────────────────────────
   const { data: cur } = useQuery({
-    queryKey: ["dashboard", "sup", "cur", currentRange, branchId],
+    queryKey: ["dashboard", "sup", "cur", currentRange, branchId, channel],
     queryFn: () =>
       summaryFn({
         data: {
           date_from: currentRange.from,
           date_to: currentRange.to,
           branch_id: branchId,
+          route_mode: routeMode,
         },
       }),
   });
 
   const { data: prev } = useQuery({
-    queryKey: ["dashboard", "sup", "prev", previousRange, branchId],
+    queryKey: ["dashboard", "sup", "prev", previousRange, branchId, channel],
     queryFn: () =>
       summaryFn({
         data: {
           date_from: previousRange.from,
           date_to: previousRange.to,
           branch_id: branchId,
+          route_mode: routeMode,
         },
       }),
   });
 
   const { data: trend } = useQuery({
-    queryKey: ["dashboard", "trend", currentRange, branchId],
+    queryKey: ["dashboard", "trend", currentRange, branchId, channel],
     queryFn: () =>
       trendFn({
         data: {
           date_from: currentRange.from,
           date_to: currentRange.to,
           branch_id: branchId,
+          route_mode: routeMode,
         },
       }),
   });
 
-  const { data: byDriver } = useQuery({
-    queryKey: ["dashboard", "byDriver", currentRange, branchId],
+  const { data: byDriverDispatch } = useQuery({
+    queryKey: ["dashboard", "byDriver", "dispatch", currentRange, branchId],
     queryFn: () =>
       byDriverFn({
         data: {
           date_from: currentRange.from,
           date_to: currentRange.to,
           branch_id: branchId,
+          route_mode: "dispatch",
         },
       }),
+    enabled: channel === "all" || channel === "dispatch",
+  });
+
+  const { data: byDriverPreorder } = useQuery({
+    queryKey: ["dashboard", "byDriver", "preorder", currentRange, branchId],
+    queryFn: () =>
+      byDriverFn({
+        data: {
+          date_from: currentRange.from,
+          date_to: currentRange.to,
+          branch_id: branchId,
+          route_mode: "preorder",
+        },
+      }),
+    enabled: channel === "all" || channel === "preorder",
   });
 
   // ── chart data ───────────────────────────────────────────────────────────
@@ -123,12 +137,6 @@ export function SupervisorDashboard() {
     Pendiente: d.pending,
   }));
 
-  const driverCompData = (byDriver ?? []).slice(0, 10).map((d) => ({
-    name: d.driver_name ?? "—",
-    Vendido: d.sold,
-    Cobrado: d.collected,
-  }));
-
   // ── KPI shortcuts ─────────────────────────────────────────────────────────
   const delivered = cur?.deliveries.delivered ?? 0;
   const total = cur?.deliveries.total ?? 0;
@@ -136,6 +144,8 @@ export function SupervisorDashboard() {
   const pending = cur?.deliveries.pending ?? 0;
   const soldAmount = cur?.deliveries.soldAmount ?? 0;
   const collectedTotal = cur?.payments.collectedTotal ?? 0;
+  const showDispatch = channel === "all" || channel === "dispatch";
+  const showPreorder = channel === "all" || channel === "preorder";
 
   // ── render ───────────────────────────────────────────────────────────────
   return (
@@ -152,6 +162,8 @@ export function SupervisorDashboard() {
           />
         }
       />
+
+      <DashboardRouteFilter value={channel} onChange={setChannel} />
 
       {/* KPI grid — sparklines for money, simple for counts */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
@@ -188,9 +200,8 @@ export function SupervisorDashboard() {
         />
       </div>
 
-      {/* Charts row — 2 cols desktop, stacked mobile */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Delivery outcomes stacked bar */}
+      {/* Charts row */}
+      <div className="grid grid-cols-1 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Resultados de entregas</CardTitle>
@@ -210,101 +221,15 @@ export function SupervisorDashboard() {
             </ChartContainer>
           </CardContent>
         </Card>
-
-        {/* Driver comparison grouped horizontal bar */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Comparación por repartidor</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={driverComparisonConfig} className="h-52">
-              <BarChart data={driverCompData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis
-                  type="number"
-                  tickFormatter={(v) => fmtMoney(v)}
-                  tick={{ fontSize: 10 }}
-                />
-                <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} />
-                <ChartTooltip formatter={moneyFmt} />
-                <Legend iconType="circle" iconSize={10} />
-                <Bar dataKey="Vendido" fill={C1} radius={[0, 3, 3, 0]} name="Vendido" />
-                <Bar dataKey="Cobrado" fill={C2} radius={[0, 3, 3, 0]} name="Cobrado" />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
       </div>
 
-      {/* Driver detail table */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Detalle por repartidor</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-muted-foreground">
-                  <th className="px-4 py-2.5 text-left font-medium">Repartidor</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Vendido</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Cobrado</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Pendiente</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Gastos</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(byDriver ?? []).length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-muted-foreground"
-                    >
-                      Sin datos para el período.
-                    </td>
-                  </tr>
-                ) : (
-                  (byDriver ?? []).map((d) => (
-                    <tr key={d.driver_id} className="border-b last:border-0 hover:bg-muted/20">
-                      <td className="px-4 py-2.5">
-                        <Link
-                          to="/app/deliveries"
-                          search={{ driver_id: d.driver_id } as Record<string, string>}
-                          className="font-medium hover:underline"
-                        >
-                          {d.driver_name ?? "—"}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
-                        {fmtMoney(d.sold)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
-                        {fmtMoney(d.collected)}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-2.5 text-right tabular-nums",
-                          d.pending > 0 && "text-amber-600 font-medium",
-                        )}
-                      >
-                        {fmtMoney(d.pending)}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-4 py-2.5 text-right tabular-nums",
-                          d.expenses > 0 && "text-rose-600 font-medium",
-                        )}
-                      >
-                        {fmtMoney(d.expenses)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+      <DashboardDriverSegments
+        dispatchByDriver={byDriverDispatch ?? []}
+        preorderByDriver={byDriverPreorder ?? []}
+        tableVariant="supervisor"
+        showDispatch={showDispatch}
+        showPreorder={showPreorder}
+      />
     </div>
   );
 }

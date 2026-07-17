@@ -6,11 +6,24 @@ import { getLiveOperations } from "@/lib/api/admin.functions";
 import { getMyContext } from "@/lib/api/context.functions";
 import { useBranchScope } from "@/lib/branch-scope";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatCardSimple, StatGrid } from "@/components/admin/stat-cards";
 import { LiveOperationsKanban } from "@/components/admin/live-operations-kanban";
 import { LiveOperationsMap } from "@/components/admin/live-operations-map";
 import { LiveOperationsFeed } from "@/components/admin/live-operations-feed";
+import {
+  filterKanbanByMode,
+  LiveRouteSections,
+  splitLiveRoutes,
+} from "@/components/admin/live-route-sections";
 import { BranchDriverLocationToggle } from "@/components/admin/branch-driver-location-toggle";
 import { PageHeader } from "@/components/admin/data-table";
 import { APP_LOCALE, APP_TZ } from "@/lib/tz";
@@ -50,6 +63,19 @@ function LiveOperationsPage() {
     refetchIntervalInBackground: true,
   });
 
+  const routeGroups = useMemo(() => splitLiveRoutes(data?.routes ?? []), [data?.routes]);
+
+  const kanbanViews = useMemo(() => {
+    if (!data) return null;
+    if (routeId !== "all") {
+      return [{ title: undefined, kanban: data.kanban }];
+    }
+    return [
+      { title: "Tiendas de abarrotes", kanban: filterKanbanByMode(data.kanban, false) },
+      { title: "Hoteles y restaurantes", kanban: filterKanbanByMode(data.kanban, true) },
+    ];
+  }, [data, routeId]);
+
   const lastUpdate = useMemo(() => {
     if (!dataUpdatedAt) return null;
     return new Date(dataUpdatedAt).toLocaleTimeString(APP_LOCALE, {
@@ -88,16 +114,31 @@ function LiveOperationsPage() {
             {lastUpdate && <span className="hidden sm:inline">· {lastUpdate}</span>}
           </div>
           <Select value={routeId} onValueChange={setRouteId}>
-            <SelectTrigger className="w-[180px] h-9 text-sm">
+            <SelectTrigger className="w-[200px] h-9 text-sm">
               <SelectValue placeholder="Todas las rutas" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas las rutas</SelectItem>
-              {(data?.routes ?? []).map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.name}
-                </SelectItem>
-              ))}
+              {routeGroups.dispatch.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Tiendas de abarrotes</SelectLabel>
+                  {routeGroups.dispatch.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {routeGroups.preorder.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Hoteles y restaurantes</SelectLabel>
+                  {routeGroups.preorder.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -134,66 +175,11 @@ function LiveOperationsPage() {
           </StatGrid>
 
           {data.routes.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {data.routes.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => setRouteId(r.id)}
-                  className={cn(
-                    "rounded-xl border p-3 text-left transition-colors hover:bg-muted/40",
-                    routeId === r.id && "border-primary bg-primary/5",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium text-sm truncate">{r.name}</div>
-                    <span className="text-xs font-bold tabular-nums text-primary">{r.progress_pct}%</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                    {r.driver_name ?? "Sin repartidor"}
-                    {(r as any).is_preorder
-                      ? " · Ruta de pedidos"
-                      : !r.dispatched && " · Sin despacho"}
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-500"
-                      style={{ width: `${r.progress_pct}%` }}
-                    />
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-                    <span className="text-emerald-600">{r.delivered} ✓</span>
-                    <span className="text-amber-600">{r.pending} ◷</span>
-                    <span className="text-rose-600">{r.failed} ✕</span>
-                    <span>{r.unvisited} ○</span>
-                    {r.failed_pct > 0 && <span className="text-rose-600">{r.failed_pct}% fallidas</span>}
-                  </div>
-                  {(r.stops_per_hour != null || r.sequence_score != null) && (
-                    <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] font-medium tabular-nums">
-                      {r.stops_per_hour != null && (
-                        <span className="text-primary">{r.stops_per_hour} paradas/h</span>
-                      )}
-                      {r.avg_minutes_per_stop != null && (
-                        <span className="text-muted-foreground">{r.avg_minutes_per_stop} min/parada</span>
-                      )}
-                      {r.sequence_score != null && (
-                        <span
-                          className={cn(
-                            r.sequence_score >= 80
-                              ? "text-emerald-600"
-                              : r.sequence_score >= 50
-                                ? "text-amber-600"
-                                : "text-rose-600",
-                          )}
-                        >
-                          Orden {r.sequence_score}%
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
+            <LiveRouteSections
+              routes={data.routes}
+              selectedRouteId={routeId}
+              onSelectRoute={setRouteId}
+            />
           )}
 
           <Tabs defaultValue="kanban" className="space-y-4">
@@ -209,8 +195,10 @@ function LiveOperationsPage() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="kanban" className="mt-0">
-              <LiveOperationsKanban data={data} />
+            <TabsContent value="kanban" className="mt-0 space-y-6">
+              {kanbanViews?.map((view) => (
+                <LiveOperationsKanban key={view.title ?? "single"} kanban={view.kanban} title={view.title} />
+              ))}
             </TabsContent>
             <TabsContent value="map" className="mt-0 space-y-3">
               <BranchDriverLocationToggle compact />

@@ -80,6 +80,7 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
     [items],
   );
   const isDelivered = detailQ.data?.delivery?.status === "delivered";
+  const photoChanged = photoPath !== (detailQ.data?.delivery?.photo_url ?? null);
 
   const saveMut = useMutation({
     mutationFn: () =>
@@ -209,10 +210,33 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
                 </>
               )}
 
-              {isDelivered && existingPhotoUrl && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Nota entregada</p>
-                  <img src={existingPhotoUrl} alt="Nota" className="rounded-lg border w-full" />
+              {isDelivered && (
+                <div className="space-y-3">
+                  {existingPhotoUrl && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Nota entregada</p>
+                      <img src={existingPhotoUrl} alt="Nota" className="rounded-lg border w-full" />
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium flex items-center gap-1">
+                      <Icon icon={Camera01Icon} className="h-4 w-4" />
+                      {existingPhotoUrl ? "Agregar o actualizar foto" : "Foto de la nota entregada"}
+                    </p>
+                    <PhotoCapture
+                      bucket="delivery-photos"
+                      value={photoPath}
+                      previewUrl={existingPhotoUrl}
+                      onChange={setPhotoPath}
+                    />
+                  </div>
+                  <Button
+                    className="w-full h-12"
+                    onClick={() => saveMut.mutate()}
+                    disabled={saveMut.isPending || !photoChanged || !photoPath}
+                  >
+                    {saveMut.isPending ? "Guardando…" : "Guardar foto"}
+                  </Button>
                 </div>
               )}
             </>

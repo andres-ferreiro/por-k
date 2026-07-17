@@ -1,4 +1,4 @@
-import { Add01Icon, Cancel01Icon, DeliveryTruck02Icon, Edit01Icon, Package01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, Camera01Icon, Cancel01Icon, DeliveryTruck02Icon, Edit01Icon, Package01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -33,6 +33,8 @@ import {
 } from "@/components/admin/data-table";
 import { PreorderReportDialog } from "@/components/preorders/preorder-report-dialog";
 import { StatGrid, StatCardSimple } from "@/components/admin/stat-cards";
+import { PhotoCapture } from "@/components/driver/photo-capture";
+import { getPhotoViewUrls } from "@/lib/api/driver.functions";
 
 export const Route = createFileRoute("/_authenticated/app/preorders")({
   loader: async ({ context }) => {
@@ -283,10 +285,9 @@ function PreordersPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => setOrderFor({ id: c.id, name: c.name, category: c.category })}
-                      disabled={order?.status === "delivered"}
                     >
                       <Icon icon={order ? Edit01Icon : Add01Icon} className="h-4 w-4 mr-1" />
-                      {order ? "Editar" : "Pedido"}
+                      {order?.status === "delivered" ? "Agregar" : order ? "Editar" : "Pedido"}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -336,11 +337,15 @@ function OrderDialog({
   const listDrivers = useServerFn(listBranchDrivers);
   const save = useServerFn(upsertOrder);
   const cancel = useServerFn(cancelOrder);
+  const viewUrls = useServerFn(getPhotoViewUrls);
 
   const [qty, setQty] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [driverId, setDriverId] = useState("");
   const [productSearch, setProductSearch] = useState("");
+  const [photoPath, setPhotoPath] = useState<string | null>(null);
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  const [initialPhotoPath, setInitialPhotoPath] = useState<string | null>(null);
 
   const driversQ = useQuery({
     queryKey: ["branch-drivers", branchId],
@@ -359,6 +364,25 @@ function OrderDialog({
     queryFn: () => getDetail({ data: { customer_id: customer!.id, delivery_date: deliveryDate } }),
     enabled: open && !!customer,
   });
+
+  const isDelivered = (detailQ.data?.order?.status ?? existingOrder?.status) === "delivered";
+
+  useEffect(() => {
+    if (!open) return;
+    const path = detailQ.data?.photo_url ?? null;
+    setPhotoPath(path);
+    setInitialPhotoPath(path);
+  }, [open, detailQ.data?.photo_url]);
+
+  useEffect(() => {
+    if (!photoPath) {
+      setExistingPhotoUrl(null);
+      return;
+    }
+    viewUrls({ data: { bucket: "delivery-photos", paths: [photoPath] } })
+      .then((m) => setExistingPhotoUrl(m[photoPath] ?? null))
+      .catch(() => setExistingPhotoUrl(null));
+  }, [photoPath, viewUrls]);
 
   useEffect(() => {
     if (!open) {
@@ -413,6 +437,7 @@ function OrderDialog({
         .map((p) => ({ product_id: p.id, quantity: Number(qty[p.id]) || 0 }))
         .filter((i) => i.quantity > 0);
       if (items.length === 0) throw new Error("Agrega al menos un producto.");
+      const photoChanged = photoPath !== initialPhotoPath;
       return save({
         data: {
           branch_id: branchId,
@@ -421,12 +446,14 @@ function OrderDialog({
           driver_id: driverId,
           items,
           notes: notes || null,
+          ...(photoChanged ? { photo_path: photoPath } : {}),
         },
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["preorderOrders"] });
-      toast.success("Pedido guardado");
+      qc.invalidateQueries({ queryKey: ["orderDetail", customer?.id, deliveryDate] });
+      toast.success(isDelivered ? "Pedido actualizado" : "Pedido guardado");
       onOpenChange(false);
     },
     onError: (e: any) => toast.error(e?.message ?? "Error"),
@@ -442,10 +469,17 @@ function OrderDialog({
     onError: (e: any) => toast.error(e?.message ?? "Error"),
   });
 
-  const title = `${existingOrder ? "Editar pedido" : "Nuevo pedido"} — ${customer?.name ?? ""}`;
+  const title = isDelivered
+    ? `Agregar al pedido — ${customer?.name ?? ""}`
+    : `${existingOrder ? "Editar pedido" : "Nuevo pedido"} — ${customer?.name ?? ""}`;
 
   const formBody = (
     <div className="flex flex-col flex-1 min-h-0 gap-4 px-4 sm:px-6 pb-2">
+      {isDelivered && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 shrink-0">
+          Este pedido ya fue entregado. Puedes agregar productos y actualizar la foto de la nota.
+        </p>
+      )}
       <p className="text-sm text-muted-foreground shrink-0">
         Entrega: {deliveryDate} · {CATEGORY_LABELS[customer?.category ?? ""] ?? customer?.category}
       </p>
@@ -513,6 +547,21 @@ function OrderDialog({
         <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" />
       </div>
 
+      {isDelivered && (
+        <div className="space-y-2 shrink-0">
+          <p className="text-sm font-medium flex items-center gap-1">
+            <Icon icon={Camera01Icon} className="h-4 w-4" />
+            Foto de la nota entregada
+          </p>
+          <PhotoCapture
+            bucket="delivery-photos"
+            value={photoPath}
+            previewUrl={existingPhotoUrl}
+            onChange={setPhotoPath}
+          />
+        </div>
+      )}
+
       <div className="flex justify-between items-center pt-2 border-t shrink-0">
         <span className="font-medium">Total</span>
         <span className="text-lg font-semibold tabular-nums">{fmt(total)}</span>
@@ -538,7 +587,7 @@ function OrderDialog({
         onClick={() => saveMut.mutate()}
         disabled={saveMut.isPending || total <= 0 || !driverId}
       >
-        {saveMut.isPending ? "Guardando…" : "Guardar pedido"}
+        {saveMut.isPending ? "Guardando…" : isDelivered ? "Guardar cambios" : "Guardar pedido"}
       </Button>
     </div>
   );

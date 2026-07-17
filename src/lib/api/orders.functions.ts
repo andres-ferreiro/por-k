@@ -66,11 +66,44 @@ async function resolveProductPrices(
   return priceMap;
 }
 
+async function syncPaymentForDeliveredPreorder(
+  supabase: any,
+  order: { branch_id: string; route_id: string; customer_id: string },
+  deliveryId: string,
+  driverId: string,
+  total: number,
+) {
+  if (total <= 0) return;
+  const payRow = {
+    branch_id: order.branch_id,
+    route_id: order.route_id,
+    customer_id: order.customer_id,
+    driver_id: driverId,
+    delivery_id: deliveryId,
+    amount: Number(total.toFixed(2)),
+    method: "credit" as const,
+    status: "pending" as const,
+  };
+  const { data: existingPay } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("delivery_id", deliveryId)
+    .maybeSingle();
+  if (existingPay) {
+    const { error } = await supabase.from("payments").update(payRow).eq("id", existingPay.id);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabase.from("payments").insert(payRow);
+    if (error) throw new Error(error.message);
+  }
+}
+
 async function syncDeliveryFromOrder(
   supabase: any,
   order: { id: string; branch_id: string; route_id: string; customer_id: string; delivery_date: string; delivery_id: string | null },
   items: { product_id: string; quantity: number; unit_price: number }[],
   driverId: string,
+  opts?: { photo_path?: string | null },
 ) {
   if (!driverId) {
     throw new Error("Selecciona un repartidor para este pedido.");
@@ -86,18 +119,23 @@ async function syncDeliveryFromOrder(
   };
 
   let deliveryId = order.delivery_id;
+  let isDelivered = false;
   if (deliveryId) {
     const { data: existing } = await supabase
       .from("deliveries")
       .select("status")
       .eq("id", deliveryId)
       .maybeSingle();
-    if (existing?.status === "delivered") {
-      throw new Error("No se puede modificar un pedido ya entregado.");
+    isDelivered = existing?.status === "delivered";
+    const updatePayload: Record<string, unknown> = { driver_id: deliveryRow.driver_id };
+    if (isDelivered) {
+      if (opts?.photo_path) updatePayload.photo_url = opts.photo_path;
+    } else {
+      updatePayload.status = "pending";
     }
     const { error: uErr } = await supabase
       .from("deliveries")
-      .update({ status: "pending", driver_id: deliveryRow.driver_id })
+      .update(updatePayload)
       .eq("id", deliveryId);
     if (uErr) throw new Error(uErr.message);
   } else {
@@ -124,6 +162,9 @@ async function syncDeliveryFromOrder(
   }
 
   const total = items.reduce((s, i) => s + i.unit_price * i.quantity, 0);
+  if (isDelivered) {
+    await syncPaymentForDeliveredPreorder(supabase, order, deliveryId, driverId, total);
+  }
   return { delivery_id: deliveryId, total };
 }
 
@@ -258,7 +299,7 @@ export const getOrderDetail = createServerFn({ method: "POST" })
       .from("customer_orders")
       .select(`
         id, status, notes, delivery_id, branch_id, route_id, customer_id, delivery_date,
-        deliveries(driver_id),
+        deliveries(driver_id, photo_url, status),
         customer_order_items(product_id, quantity, unit_price, products(name, unit))
       `)
       .eq("customer_id", data.customer_id)
@@ -276,7 +317,7 @@ export const getOrderDetail = createServerFn({ method: "POST" })
       unit_price: Number(i.unit_price),
     }));
 
-    const deliveryDriverId = (order as any).deliveries?.driver_id as string | null | undefined;
+    const delivery = (order as any).deliveries as { driver_id?: string | null; photo_url?: string | null; status?: string } | null;
 
     return {
       order: {
@@ -286,7 +327,8 @@ export const getOrderDetail = createServerFn({ method: "POST" })
         delivery_id: (order.delivery_id as string | null) ?? null,
       },
       items,
-      driver_id: deliveryDriverId ?? null,
+      driver_id: delivery?.driver_id ?? null,
+      photo_url: delivery?.photo_url ?? null,
     };
   });
 
@@ -305,6 +347,7 @@ export const upsertOrder = createServerFn({ method: "POST" })
       driver_id: z.string().uuid(),
       items: z.array(orderLineSchema).min(1).max(100),
       notes: z.string().max(500).nullable().optional(),
+      photo_path: z.string().max(500).nullable().optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -367,9 +410,6 @@ export const upsertOrder = createServerFn({ method: "POST" })
       .eq("delivery_date", data.delivery_date)
       .maybeSingle();
     if (exErr) throw new Error(exErr.message);
-    if (existing?.status === "delivered") {
-      throw new Error("No se puede modificar un pedido ya entregado.");
-    }
 
     let orderId: string;
     let deliveryId: string | null = existing?.delivery_id ?? null;
@@ -384,7 +424,7 @@ export const upsertOrder = createServerFn({ method: "POST" })
         .update({
           branch_id: branchId,
           route_id: routeId,
-          status: "confirmed",
+          status: existing.status === "delivered" ? "delivered" : "confirmed",
           notes: data.notes ?? null,
           placed_by: userId,
           placed_at: new Date().toISOString(),
@@ -428,6 +468,7 @@ export const upsertOrder = createServerFn({ method: "POST" })
       },
       orderItems,
       data.driver_id,
+      { photo_path: data.photo_path },
     );
 
     return { ok: true, order_id: orderId, delivery_id: syncResult.delivery_id, total: syncResult.total };

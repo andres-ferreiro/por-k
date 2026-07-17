@@ -3,6 +3,7 @@ import { fmtMoney } from "@/lib/format";
 import { PaymentStatusBadge, TagBadge } from "@/components/admin/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import type { LiveKanban } from "@/components/admin/live-route-sections";
 
 type LiveData = Awaited<ReturnType<typeof getLiveOperations>>;
 type Stop = LiveData["stops"][number];
@@ -41,32 +42,50 @@ function StopCard({ stop }: { stop: Stop }) {
   );
 }
 
-export function LiveOperationsKanban({ data }: { data: LiveData }) {
+export function LiveOperationsKanban({
+  kanban,
+  title,
+}: {
+  kanban: LiveKanban;
+  title?: string;
+}) {
+  const totalStops =
+    kanban.unvisited.length + kanban.pending.length + kanban.delivered.length + kanban.failed.length;
+
+  if (totalStops === 0 && title) return null;
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 min-h-[420px]">
-      {COLUMNS.map((col) => {
-        const items = data.kanban[col.key];
-        return (
-          <div key={col.key} className="flex flex-col min-h-0 rounded-xl border bg-card overflow-hidden">
-            <div className={cn("px-3 py-2.5 flex items-center justify-between shrink-0 border-b", col.header)}>
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
-                <span className={cn("h-2 w-2 rounded-full", col.dot)} />
-                {col.label}
+    <div className="space-y-2">
+      {title && (
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-0.5">
+          {title}
+        </h3>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 min-h-[320px]">
+        {COLUMNS.map((col) => {
+          const items = kanban[col.key];
+          return (
+            <div key={col.key} className="flex flex-col min-h-0 rounded-xl border bg-card overflow-hidden">
+              <div className={cn("px-3 py-2.5 flex items-center justify-between shrink-0 border-b", col.header)}>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+                  <span className={cn("h-2 w-2 rounded-full", col.dot)} />
+                  {col.label}
+                </div>
+                <span className="text-xs font-bold tabular-nums">{items.length}</span>
               </div>
-              <span className="text-xs font-bold tabular-nums">{items.length}</span>
+              <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-[520px]">
+                {items.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-8">Sin registros</p>
+                ) : (
+                  items.map((stop) => (
+                    <StopCard key={`${stop.route_id}-${stop.customer_id}`} stop={stop} />
+                  ))
+                )}
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-[520px]">
-              {items.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-8">Sin registros</p>
-              ) : (
-                items.map((stop) => (
-                  <StopCard key={`${stop.route_id}-${stop.customer_id}`} stop={stop} />
-                ))
-              )}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
