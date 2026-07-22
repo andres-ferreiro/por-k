@@ -32,6 +32,18 @@ async function assertCanManageOrders(roles: Set<string>) {
   throw new Error("No tienes permiso para gestionar pedidos.");
 }
 
+/** Prefer delivery outcome when order row was not synced after driver confirmation. */
+function effectiveOrderStatus(
+  orderStatus: string,
+  deliveryStatus: string | null | undefined,
+): string {
+  if (orderStatus === "delivered" || orderStatus === "failed" || orderStatus === "cancelled") {
+    return orderStatus;
+  }
+  if (deliveryStatus === "delivered" || deliveryStatus === "failed") return deliveryStatus;
+  return orderStatus;
+}
+
 async function getPreorderRouteForBranch(supabase: any, branchId: string) {
   const { data: branch, error } = await supabase
     .from("branches")
@@ -249,6 +261,7 @@ export const listOrdersForDate = createServerFn({ method: "POST" })
       .from("customer_orders")
       .select(`
         id, customer_id, status, delivery_date, notes, delivery_id,
+        deliveries(status),
         customers(name, category),
         customer_order_items(product_id, quantity, unit_price, products(name, unit))
       `)
@@ -267,12 +280,13 @@ export const listOrdersForDate = createServerFn({ method: "POST" })
         line_total: Number(i.quantity) * Number(i.unit_price),
       }));
       const total = items.reduce((s: number, i: any) => s + i.line_total, 0);
+      const deliveryStatus = (o.deliveries as { status?: string } | null)?.status ?? null;
       return {
         id: o.id as string,
         customer_id: o.customer_id as string,
         customer_name: o.customers?.name ?? "",
         category: o.customers?.category ?? "retail",
-        status: o.status as string,
+        status: effectiveOrderStatus(o.status as string, deliveryStatus),
         delivery_date: o.delivery_date as string,
         notes: (o.notes as string | null) ?? null,
         delivery_id: (o.delivery_id as string | null) ?? null,
@@ -322,13 +336,14 @@ export const getOrderDetail = createServerFn({ method: "POST" })
     return {
       order: {
         id: order.id as string,
-        status: order.status as string,
+        status: effectiveOrderStatus(order.status as string, delivery?.status),
         notes: (order.notes as string | null) ?? null,
         delivery_id: (order.delivery_id as string | null) ?? null,
       },
       items,
       driver_id: delivery?.driver_id ?? null,
       photo_url: delivery?.photo_url ?? null,
+      delivery_status: delivery?.status ?? null,
     };
   });
 

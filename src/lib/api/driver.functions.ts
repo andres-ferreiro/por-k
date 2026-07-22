@@ -1143,13 +1143,15 @@ export const confirmPreorderDelivery = createServerFn({ method: "POST" })
       await supabase.from("payments").delete().eq("delivery_id", deliveryId);
     }
 
-    await supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error: orderErr } = await supabaseAdmin
       .from("customer_orders")
       .update({
         status: data.status === "delivered" ? "delivered" : "failed",
         delivery_id: deliveryId,
       })
       .eq("id", order.id);
+    if (orderErr) throw new Error(orderErr.message);
 
     return { ok: true, delivery_id: deliveryId, total };
   });
