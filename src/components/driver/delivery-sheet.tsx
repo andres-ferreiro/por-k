@@ -42,7 +42,7 @@ type FailureReason = "closed" | "no_order" | "other";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  customer: { id: string; name: string; pending_balance?: number } | null;
+  customer: { id: string; name: string; pending_balance?: number; lat?: number | null; lng?: number | null } | null;
   autoLocationOnSell?: boolean;
 }
 
@@ -180,7 +180,8 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
         .map(([product_id, quantity]) => ({ product_id, quantity }));
 
       let location: { lat: number; lng: number; address: string | null } | undefined;
-      if (autoLocationOnSell && status === "delivered") {
+      const customerHasLocation = customer.lat != null && customer.lng != null;
+      if (autoLocationOnSell && status === "delivered" && !customerHasLocation) {
         const coords = await captureCurrentLocation();
         if (coords) {
           const address = await reverseGeocode(coords.lat, coords.lng);

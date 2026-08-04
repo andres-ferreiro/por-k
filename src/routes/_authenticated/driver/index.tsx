@@ -308,7 +308,17 @@ function DispatchRoutePage({ data }: {
       <DeliverySheet
         open={!!deliveryFor}
         onOpenChange={(o) => !o && setDeliveryFor(null)}
-        customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name, pending_balance: deliveryFor.pending_balance } : null}
+        customer={
+          deliveryFor
+            ? {
+                id: deliveryFor.id,
+                name: deliveryFor.name,
+                pending_balance: deliveryFor.pending_balance,
+                lat: deliveryFor.lat,
+                lng: deliveryFor.lng,
+              }
+            : null
+        }
         autoLocationOnSell={canWrite}
       />
 

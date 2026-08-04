@@ -628,14 +628,23 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       const locationEnabled = await branchDriverLocationEnabled(supabase, route.branch_id as string);
       if (locationEnabled) {
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-        await supabaseAdmin
+        const { data: existingCustomer } = await supabaseAdmin
           .from("customers")
-          .update({
-            lat: data.location.lat,
-            lng: data.location.lng,
-            ...(data.location.address != null ? { address: data.location.address } : {}),
-          } as any)
-          .eq("id", data.customer_id);
+          .select("lat, lng")
+          .eq("id", data.customer_id)
+          .maybeSingle();
+        const hasExistingLocation =
+          existingCustomer?.lat != null && existingCustomer?.lng != null;
+        if (!hasExistingLocation) {
+          await supabaseAdmin
+            .from("customers")
+            .update({
+              lat: data.location.lat,
+              lng: data.location.lng,
+              ...(data.location.address != null ? { address: data.location.address } : {}),
+            } as any)
+            .eq("id", data.customer_id);
+        }
       }
     }
 

@@ -33,7 +33,7 @@ export function BranchDriverLocationToggle({ compact }: Props) {
       qc.invalidateQueries({ queryKey: ["admin", "live"] });
       toast.success(
         result.driver_location_enabled
-          ? "Ubicación GPS se registrará al vender."
+          ? "Ubicación GPS se registrará en clientes sin pin."
           : "Solo se mostrarán ubicaciones guardadas.",
       );
     },
@@ -64,7 +64,7 @@ export function BranchDriverLocationToggle({ compact }: Props) {
           {isLoading
             ? "Cargando…"
             : enabled
-              ? "Al registrar una venta, se guarda la ubicación GPS del repartidor en el cliente."
+              ? "Al registrar la primera venta sin ubicación, se guarda el GPS del repartidor. Las ubicaciones ya registradas no se sobrescriben."
               : "Los pines muestran la ubicación guardada del cliente; no se actualiza al vender."}
         </p>
         {isError && <p className="text-xs text-destructive">Error al cargar configuración.</p>}
