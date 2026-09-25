@@ -4,6 +4,7 @@ import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
 import { deliveryNetTotals, deliveryPaymentAmount } from "@/lib/delivery-totals";
 import { assertSaleWithinStock, fetchDriverDayStock } from "@/lib/driver-stock";
+import { resolveDriverActiveRoute } from "@/lib/driver-route";
 
 function todayStr(): string {
   return todayInTZ();
@@ -200,16 +201,9 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
     const { supabase, userId } = context;
     const today = todayStr();
 
-    const [{ data: dispatchRoutes, error: dRouteErr }, { data: assignedDeliveries, error: delAssignErr }] =
+    const [dispatchRoute, { data: assignedDeliveries, error: delAssignErr }] =
       await Promise.all([
-        supabase
-          .from("routes")
-          .select("id, name, branch_id, route_mode, branches!routes_branch_id_fkey(name)")
-          .eq("driver_id", userId)
-          .eq("is_active", true)
-          .eq("route_mode", "dispatch")
-          .order("updated_at", { ascending: false })
-          .limit(1),
+        resolveDriverActiveRoute(supabase, userId, today, { routeMode: "dispatch" }),
         supabase
           .from("deliveries")
           .select(`
@@ -220,10 +214,7 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
           .eq("driver_id", userId)
           .eq("delivery_date", today),
       ]);
-    if (dRouteErr) throw new Error(dRouteErr.message);
     if (delAssignErr) throw new Error(delAssignErr.message);
-
-    const dispatchRoute = (dispatchRoutes ?? [])[0] as any;
     const preorderDeliveries = (assignedDeliveries ?? []).filter(
       (d: any) => d.routes?.route_mode === "preorder",
     );
@@ -336,15 +327,7 @@ export const upsertDelivery = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const today = todayStr();
 
-    const { data: routes, error: rErr } = await supabase
-      .from("routes")
-      .select("id, branch_id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as any;
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
     if (!route) throw new Error("No tienes una ruta asignada.");
 
     await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
@@ -417,10 +400,8 @@ export const getTodayDeliveryDetail = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const today = todayStr();
-    const { data: routes } = await supabase
-      .from("routes").select("id").eq("driver_id", userId).eq("is_active", true)
-      .order("updated_at", { ascending: false }).limit(1);
-    const routeId = (routes ?? [])[0]?.id;
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
+    const routeId = route?.id;
     if (!routeId) return { delivery: null, items: [], returns: [], payment: null };
 
     const { data: del } = await supabase
@@ -481,12 +462,7 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const today = todayStr();
 
-    const { data: routes, error: rErr } = await supabase
-      .from("routes").select("id, branch_id")
-      .eq("driver_id", userId).eq("is_active", true)
-      .order("updated_at", { ascending: false }).limit(1);
-    if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as any;
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
     if (!route) throw new Error("No tienes una ruta asignada.");
 
     await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
@@ -713,18 +689,11 @@ export const createPayment = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => paymentSchema.parse(d))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { data: routes, error: rErr } = await supabase
-      .from("routes")
-      .select("id, branch_id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as any;
+    const today = todayStr();
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
     if (!route) throw new Error("No tienes una ruta asignada.");
 
-    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, todayStr());
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
 
     const { data: row, error } = await supabase
       .from("payments")
@@ -811,18 +780,12 @@ export const createExpense = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => expenseSchema.parse(d))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const today = todayStr();
     const branchId = await getMyBranch(supabase, userId);
-    const { data: routes } = await supabase
-      .from("routes")
-      .select("id, branch_id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    const route = (routes ?? [])[0] as any;
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
     if (!route?.id) throw new Error("No tienes una ruta asignada.");
 
-    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, todayStr());
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
 
     const { data: row, error } = await supabase
       .from("expenses")
@@ -830,7 +793,7 @@ export const createExpense = createServerFn({ method: "POST" })
         branch_id: branchId,
         route_id: route.id,
         driver_id: userId,
-        expense_date: todayStr(),
+        expense_date: today,
         amount: data.amount,
         description: data.description,
         photo_url: data.photo_path ?? null,
@@ -941,15 +904,7 @@ export const updateCustomerLocation = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
 
     // Verify customer is on driver's active route
-    const { data: routes, error: rErr } = await supabase
-      .from("routes")
-      .select("id, branch_id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as any;
+    const route = await resolveDriverActiveRoute(supabase, userId, todayStr());
     if (!route) throw new Error("No tienes una ruta asignada.");
 
     // Verify location editing is enabled for this branch
@@ -1180,19 +1135,12 @@ export const settlePendingBalance = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const today = todayStr();
 
-    const { data: routes, error: rErr } = await supabase
-      .from("routes")
-      .select("id, branch_id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as any;
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
     if (!route) throw new Error("No tienes una ruta asignada.");
 
-    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, todayStr());
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
 
     // Read current pending_balance
     const { data: customer, error: cErr } = await supabase
@@ -1258,14 +1206,8 @@ export const publishDriverLocation = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
 
     // Get active route id (optional — we store it for context)
-    const { data: routes } = await supabase
-      .from("routes")
-      .select("id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    const routeId = (routes ?? [])[0]?.id ?? null;
+    const route = await resolveDriverActiveRoute(supabase, userId, todayStr());
+    const routeId = route?.id ?? null;
 
     // Upsert: one row per driver, always the latest position
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

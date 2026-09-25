@@ -3,6 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
 import { fetchDriverDayStock } from "@/lib/driver-stock";
+import { resolveDriverActiveRoute } from "@/lib/driver-route";
 
 async function resolveBranchId(
   supabase: any,
@@ -863,15 +864,7 @@ export const getMyDispatchStock = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const today = todayInTZ();
 
-    const { data: routes, error: rErr } = await supabase
-      .from("routes")
-      .select("id, branch_id")
-      .eq("driver_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (rErr) throw new Error(rErr.message);
-    const route = (routes ?? [])[0] as { id: string; branch_id: string } | undefined;
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
     if (!route) return { dispatch_id: null, stock: {} as Record<string, number>, total_units: 0, has_loaded_stock: false };
 
     let excludeDeliveryId: string | null = null;
