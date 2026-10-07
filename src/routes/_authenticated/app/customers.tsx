@@ -27,6 +27,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { fmtMoney } from "@/lib/format";
 import { StatusBadge, TagBadge } from "@/components/admin/status-badge";
+import { CustomerAccountDialog } from "@/components/admin/customer-account-dialog";
 import { LocationPicker } from "@/components/location-picker";
 import { useBranchScope } from "@/lib/branch-scope";
 import { useSorting } from "@/hooks/use-sorting";
@@ -102,6 +103,7 @@ function CustomersPage() {
   const { sortKey, sortDir, toggle, sort } = useSorting("name");
 
   const [saldando, setSaldando] = useState<Customer | null>(null);
+  const [accountFor, setAccountFor] = useState<Customer | null>(null);
 
   const qc = useQueryClient();
   const del = useServerFn(deleteCustomer);
@@ -224,6 +226,9 @@ function CustomersPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
+                      <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => setAccountFor(c as Customer)}>
+                        Cuenta
+                      </Button>
                       {Number(c.pending_balance ?? 0) > 0 ? (
                         <>
                           <StatusBadge tone="danger" className="tabular-nums normal-case tracking-normal">
@@ -297,6 +302,8 @@ function CustomersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CustomerAccountDialog customer={accountFor} onOpenChange={(v) => !v && setAccountFor(null)} />
 
       <AlertDialog open={!!saldando} onOpenChange={(v) => !v && setSaldando(null)}>
         <AlertDialogContent>
