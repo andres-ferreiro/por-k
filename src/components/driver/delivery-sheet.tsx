@@ -33,6 +33,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
+import { useReceipt } from "@/components/driver/receipt-provider";
 
 type Status = "delivered" | "pending" | "failed";
 type Method = "cash" | "transfer" | "credit" | "other";
@@ -80,6 +81,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const [settleMethod, setSettleMethod] = useState<Method>("cash");
 
   const qc = useQueryClient();
+  const { showReceipt } = useReceipt();
   const save = useServerFn(saveDeliveryVisit);
   const settle = useServerFn(settlePendingBalance);
   const getProducts = useServerFn(getCustomerPricedProducts);
@@ -189,7 +191,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
         }
       }
 
-      await save({
+      const saved = await save({
         data: {
           customer_id: customer.id,
           status,
@@ -205,16 +207,32 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
       });
 
       // If the driver is settling the pending balance, record it as a separate payment
-      if (settlePending && pendingBalance > 0) {
+      const settledNow = settlePending && pendingBalance > 0;
+      if (settledNow) {
         await settle({
           data: { customer_id: customer.id, method: settleMethod },
         });
       }
+
+      return {
+        deliveryId: saved.delivery_id as string,
+        status,
+        total: Number(saved.total ?? 0),
+        previousBalance: pendingBalance > 0 ? { amount: pendingBalance, settled: settledNow } : null,
+      };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       toast.success("Visita guardada.");
       qc.invalidateQueries({ queryKey: ["driver"] });
       onOpenChange(false);
+      // Offer the customer receipt once the sale is saved. Small delay so this drawer
+      // finishes closing before the receipt drawer opens.
+      if (result && result.status === "delivered" && result.total > 0) {
+        setTimeout(
+          () => showReceipt({ deliveryId: result.deliveryId, previousBalance: result.previousBalance }),
+          350,
+        );
+      }
     },
     onError: (e: any) => toast.error(e?.message ?? "No se pudo guardar."),
   });
