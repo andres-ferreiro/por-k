@@ -7,6 +7,7 @@ import {
   CreditCardIcon,
   Loading03Icon,
   MoreHorizontalIcon,
+  PrinterIcon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
@@ -18,6 +19,8 @@ import { deliveryStatusTone } from "@/lib/badge-tones";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { useState } from "react";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
+import { Button } from "@/components/ui/button";
+import { useReceipt } from "@/components/driver/receipt-provider";
 import { fmtMoney } from "@/lib/format";
 import { useDashboardPeriod, type Period } from "@/hooks/use-dashboard-period";
 import { cn } from "@/lib/utils";
@@ -96,6 +99,7 @@ function ProgressRing({ value, max, size = 80 }: { value: number; max: number; s
 }
 
 function Page() {
+  const { showReceipt } = useReceipt();
   const fetchDeliveries = useServerFn(listTodayDeliveries);
   const fetchPayments = useServerFn(listTodayPayments);
   const fetchExpenses = useServerFn(listTodayExpenses);
@@ -312,6 +316,21 @@ function Page() {
                         )}
                       </div>
                     </div>
+                    {r.status === "delivered" && r.total > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-1.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showReceipt({ deliveryId: r.id });
+                        }}
+                      >
+                        <Icon icon={PrinterIcon} className="h-4 w-4" />
+                        Recibo
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               );

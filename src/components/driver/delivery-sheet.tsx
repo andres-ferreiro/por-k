@@ -34,6 +34,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
+import { useReceipt } from "@/components/driver/receipt-provider";
 
 type Status = "delivered" | "pending" | "failed";
 type Method = "cash" | "transfer" | "credit" | "other";
@@ -80,6 +81,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
 
   const qc = useQueryClient();
+  const { showReceipt } = useReceipt();
   const save = useServerFn(saveDeliveryVisit);
   const collectDebt = useServerFn(collectPreviousDebt);
   const getProducts = useServerFn(getCustomerPricedProducts);
@@ -188,7 +190,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
         }
       }
 
-      await save({
+      const saved = await save({
         data: {
           customer_id: customer.id,
           status,
@@ -207,35 +209,48 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
       // Previous debt collected (full or partial): recorded as its own payment AFTER
       // the visit is saved, so a failure here never loses the sale.
+      let debt: { paid: number; remaining: number } | null = null;
       if (debtPaid > 0) {
         try {
-          const res = await collectDebt({
+          debt = await collectDebt({
             data: {
               customer_id: customer.id,
               amount: debtPaid,
               method: method === "credit" ? "other" : method,
             },
           });
-          return { debt: res };
         } catch (e: any) {
           qc.invalidateQueries({ queryKey: ["driver"] });
           throw new Error(`La visita se guardó, pero el cobro de la deuda NO: ${e?.message ?? "error"}. Revisa y guarda otra vez.`);
         }
       }
-      return { debt: null };
+      return {
+        debt,
+        deliveryId: saved.delivery_id as string,
+        status,
+        total: Number(saved.total ?? 0),
+      };
     },
-    onSuccess: (res) => {
-      if (res?.debt) {
+    onSuccess: (result) => {
+      if (result?.debt) {
         toast.success(
-          res.debt.remaining > 0
-            ? `Visita guardada. Cobraste ${fmt(res.debt.paid)} de deuda. Aún debe ${fmt(res.debt.remaining)}.`
-            : `Visita guardada. Deuda anterior saldada (${fmt(res.debt.paid)}).`,
+          result.debt.remaining > 0
+            ? `Visita guardada. Cobraste ${fmt(result.debt.paid)} de deuda. Aún debe ${fmt(result.debt.remaining)}.`
+            : `Visita guardada. Deuda anterior saldada (${fmt(result.debt.paid)}).`,
         );
       } else {
         toast.success("Visita guardada.");
       }
       qc.invalidateQueries({ queryKey: ["driver"] });
       onOpenChange(false);
+      // Offer the customer receipt once the sale is saved. Small delay so this drawer
+      // finishes closing before the receipt drawer opens.
+      if (result && result.status === "delivered" && result.total > 0) {
+        setTimeout(
+          () => showReceipt({ deliveryId: result.deliveryId }),
+          350,
+        );
+      }
     },
     onError: (e: any) => toast.error(e?.message ?? "No se pudo guardar."),
   });
