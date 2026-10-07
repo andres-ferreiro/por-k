@@ -90,12 +90,14 @@ function PaymentsPage() {
   const pagination = usePagination(tableRows, undefined, [search, sortKey, sortDir, dateFrom, dateTo, routeId, driverId, method, status, origin]);
 
   const totals = useMemo(() => {
-    const paid = tableRows.filter((p) => p.status === "paid");
+    // Partially paid sales count their received part as collected and only the rest as pending.
     const byMethod: Record<string, number> = { cash: 0, transfer: 0, credit: 0, other: 0 };
-    for (const p of paid) byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount;
+    for (const p of tableRows) {
+      if (p.collected > 0) byMethod[p.method] = (byMethod[p.method] ?? 0) + p.collected;
+    }
     return {
-      total: paid.reduce((a, p) => a + p.amount, 0),
-      pending: tableRows.filter((p) => p.status === "pending").reduce((a, p) => a + p.amount, 0),
+      total: tableRows.reduce((a, p) => a + p.collected, 0),
+      pending: tableRows.reduce((a, p) => a + (p.amount - p.collected), 0),
       byMethod,
       count: tableRows.length,
     };
@@ -236,7 +238,12 @@ function PaymentsPage() {
                     {r.from_delivery ? "Venta entrega" : "Abono manual"}
                   </StatusBadge>
                 </TableCell>
-                <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.amount)}</TableCell>
+                <TableCell className="text-right tabular-nums font-medium">
+                  {fmtMoney(r.amount)}
+                  {r.status === "pending" && r.collected > 0 && (
+                    <div className="text-xs font-normal text-emerald-600">Cobrado {fmtMoney(r.collected)}</div>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
