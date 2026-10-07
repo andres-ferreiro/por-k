@@ -103,27 +103,38 @@ type RouteRow = {
  * (today's sale is added on top), so subtract today's outstanding here.
  * Read-only: nothing is written.
  */
+/** Unpaid amount of today's sales per customer (read-only). */
+async function todayOutstandingByCustomer(
+  supabase: any,
+  customerIds: string[],
+  today: string,
+): Promise<Map<string, number> | null> {
+  const out = new Map<string, number>();
+  if (customerIds.length === 0) return out;
+  const { startISO } = tzDayRange(today);
+  const { data, error } = await supabase
+    .from("payments")
+    .select("customer_id, amount, amount_paid")
+    .in("customer_id", customerIds)
+    .eq("status", "pending")
+    .eq("is_abono", false)
+    .eq("carried_over", false)
+    .gte("paid_at", startISO);
+  if (error || !data) return null;
+  for (const p of data as any[]) {
+    out.set(p.customer_id, (out.get(p.customer_id) ?? 0) + Number(p.amount) - Number(p.amount_paid));
+  }
+  return out;
+}
+
 async function withPreviousBalance<T extends { id: string; pending_balance: number }>(
   supabase: any,
   customers: T[],
   today: string,
 ): Promise<T[]> {
   const ids = customers.filter((c) => c.pending_balance > 0).map((c) => c.id);
-  if (ids.length === 0) return customers;
-  const { startISO } = tzDayRange(today);
-  const { data, error } = await supabase
-    .from("payments")
-    .select("customer_id, amount, amount_paid")
-    .in("customer_id", ids)
-    .eq("status", "pending")
-    .eq("is_abono", false)
-    .eq("carried_over", false)
-    .gte("paid_at", startISO);
-  if (error || !data) return customers; // fail open: show the raw balance as before
-  const todayOut = new Map<string, number>();
-  for (const p of data as any[]) {
-    todayOut.set(p.customer_id, (todayOut.get(p.customer_id) ?? 0) + Number(p.amount) - Number(p.amount_paid));
-  }
+  const todayOut = await todayOutstandingByCustomer(supabase, ids, today);
+  if (!todayOut) return customers; // fail open: show the raw balance as before
   return customers.map((c) => ({
     ...c,
     pending_balance: Math.max(0, Math.round((c.pending_balance - (todayOut.get(c.id) ?? 0)) * 100) / 100),
@@ -1186,6 +1197,63 @@ export const settlePendingBalance = createServerFn({ method: "POST" })
     if (settleErr) throw new Error(settleErr.message);
 
     return { ok: true, amount: Number(settled ?? 0) };
+  });
+
+// ============ COLLECT PREVIOUS DEBT (full or partial) ============
+
+// The driver collects some or all of the customer's PREVIOUS debt (balance minus
+// today's unpaid sales). Full amount -> same settle path as before (also marks the
+// older unpaid sales as paid). Partial -> a plain abono in the ledger.
+export const collectPreviousDebt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      customer_id: z.string().uuid(),
+      amount: z.number().positive().max(10_000_000),
+      method: z.enum(["cash", "transfer", "other"]),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
+    if (!route) throw new Error("No tienes una ruta asignada.");
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
+
+    const { data: customer, error: cErr } = await supabase
+      .from("customers").select("id, pending_balance").eq("id", data.customer_id).maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!customer) throw new Error("Cliente no encontrado.");
+
+    const todayOut = await todayOutstandingByCustomer(supabase, [data.customer_id], today);
+    if (!todayOut) throw new Error("No se pudo calcular la deuda anterior.");
+    const previous = Math.round((Number(customer.pending_balance ?? 0) - (todayOut.get(data.customer_id) ?? 0)) * 100) / 100;
+    const amount = Math.round(data.amount * 100) / 100;
+
+    if (previous <= 0) throw new Error("El cliente no tiene deuda anterior.");
+    if (amount > previous + 0.005) {
+      throw new Error(`El monto ($${amount.toFixed(2)}) es mayor a la deuda anterior ($${previous.toFixed(2)}).`);
+    }
+
+    if (Math.abs(amount - previous) < 0.005) {
+      const { error } = await supabase.rpc("settle_customer_balance", {
+        p_customer_id: data.customer_id,
+        p_method: data.method,
+        p_note: "Saldo pendiente saldado",
+      });
+      if (error) throw new Error(error.message);
+      return { ok: true as const, paid: previous, remaining: 0 };
+    }
+
+    const { error } = await (supabase as any).rpc("register_customer_payment", {
+      p_customer_id: data.customer_id,
+      p_amount: amount,
+      p_method: data.method,
+      p_note: "Abono a deuda anterior",
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true as const, paid: amount, remaining: Math.round((previous - amount) * 100) / 100 };
   });
 
 // ============ DRIVER LIVE LOCATION ============
