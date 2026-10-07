@@ -97,6 +97,39 @@ type RouteRow = {
   route_mode: "dispatch" | "preorder";
 };
 
+/**
+ * Since the account ledger, customers.pending_balance already includes today's
+ * unpaid sales. The visit screen has always meant "previous debt" by that field
+ * (today's sale is added on top), so subtract today's outstanding here.
+ * Read-only: nothing is written.
+ */
+async function withPreviousBalance<T extends { id: string; pending_balance: number }>(
+  supabase: any,
+  customers: T[],
+  today: string,
+): Promise<T[]> {
+  const ids = customers.filter((c) => c.pending_balance > 0).map((c) => c.id);
+  if (ids.length === 0) return customers;
+  const { startISO } = tzDayRange(today);
+  const { data, error } = await supabase
+    .from("payments")
+    .select("customer_id, amount, amount_paid")
+    .in("customer_id", ids)
+    .eq("status", "pending")
+    .eq("is_abono", false)
+    .eq("carried_over", false)
+    .gte("paid_at", startISO);
+  if (error || !data) return customers; // fail open: show the raw balance as before
+  const todayOut = new Map<string, number>();
+  for (const p of data as any[]) {
+    todayOut.set(p.customer_id, (todayOut.get(p.customer_id) ?? 0) + Number(p.amount) - Number(p.amount_paid));
+  }
+  return customers.map((c) => ({
+    ...c,
+    pending_balance: Math.max(0, Math.round((c.pending_balance - (todayOut.get(c.id) ?? 0)) * 100) / 100),
+  }));
+}
+
 function mapCustomerRow(
   r: { position: number; customers: any },
   delMap: Map<string, any>,
@@ -182,7 +215,7 @@ async function loadRouteCustomersWithStops(
 
   const delMap = new Map(deliveries.map((d: any) => [d.customer_id, d]));
   const orderMap = new Map(orders.map((o: any) => [o.customer_id, o]));
-  return (rc ?? []).map((r: any) => mapCustomerRow(r, delMap, orderMap));
+  return withPreviousBalance(supabase, ((rc ?? []) as any[]).map((r) => mapCustomerRow(r, delMap, orderMap)), today);
 }
 
 function toRouteRow(route: any): RouteRow {
@@ -254,7 +287,7 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
       }
       const delMap = new Map(deliveries.map((d: any) => [d.customer_id, d]));
       const orderMap = new Map<string, any>();
-      const customers = (rc ?? []).map((r: any) => mapCustomerRow(r, delMap, orderMap));
+      const customers = await withPreviousBalance(supabase, ((rc ?? []) as any[]).map((r) => mapCustomerRow(r, delMap, orderMap)), today);
 
       dispatchBlock = {
         route: toRouteRow(dispatchRoute),
