@@ -458,14 +458,14 @@ export const getTodayDeliveryDetail = createServerFn({ method: "POST" })
     const [{ data: items }, { data: rets }, { data: pay }] = await Promise.all([
       supabase.from("delivery_items").select("product_id, quantity, unit_price").eq("delivery_id", del.id),
       supabase.from("delivery_returns").select("product_id, quantity").eq("delivery_id", del.id),
-      supabase.from("payments").select("id, amount, method, status").eq("delivery_id", del.id).maybeSingle(),
+      supabase.from("payments").select("id, amount, amount_paid, method, status").eq("delivery_id", del.id).maybeSingle(),
     ]);
 
     return {
       delivery: { id: del.id, status: del.status, comment: del.comment, photo_url: del.photo_url, failure_reason: del.failure_reason, failure_photo_url: del.failure_photo_url },
       items: (items ?? []).map((i: any) => ({ product_id: i.product_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
       returns: (rets ?? []).map((r: any) => ({ product_id: r.product_id, quantity: Number(r.quantity) })),
-      payment: pay ? { method: pay.method, status: pay.status, amount: Number(pay.amount) } : null,
+      payment: pay ? { method: pay.method, status: pay.status, amount: Number(pay.amount), amount_paid: Number((pay as any).amount_paid ?? 0) } : null,
     };
   });
 
@@ -486,6 +486,8 @@ const saveDeliveryVisitSchema = z.object({
   payment: z.object({
     method: z.enum(["cash", "transfer", "credit", "other"]),
     status: z.enum(["paid", "pending"]),
+    // Only sent when the sale is NOT fully paid: how much of it was received (partial payment).
+    amount_paid: z.number().min(0).max(10_000_000).optional(),
   }),
   location: z
     .object({
@@ -632,6 +634,10 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
         amount: Number(total.toFixed(2)),
         method: data.payment.method,
         status: data.payment.status,
+        // Partial payment: the DB trigger keeps status/ledger/balance in sync from amount_paid.
+        ...(data.payment.status === "pending" && data.payment.amount_paid !== undefined
+          ? { amount_paid: Math.min(Number(data.payment.amount_paid.toFixed(2)), Number(total.toFixed(2))) }
+          : {}),
       };
       if (existingPay) {
         const { error } = await supabase.from("payments").update(payRow).eq("id", existingPay.id);

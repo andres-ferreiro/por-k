@@ -37,7 +37,6 @@ import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
 
 type Status = "delivered" | "pending" | "failed";
 type Method = "cash" | "transfer" | "credit" | "other";
-type PayStatus = "paid" | "pending";
 type FailureReason = "closed" | "no_order" | "other";
 
 interface Props {
@@ -71,16 +70,14 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const [qty, setQty] = useState<Record<string, number>>({});
   const [retQty, setRetQty] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<Method>("cash");
-  const [payStatus, setPayStatus] = useState<PayStatus>("paid");
+  // Money received at this visit as typed by the driver. null = not touched: defaults to
+  // "today's sale paid in full, old debt untouched" (the way the app has always worked).
+  const [received, setReceived] = useState<string | null>(null);
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [keypadFor, setKeypadFor] = useState<{ id: string; type: "sell" | "return"; name: string } | null>(null);
 
-  // Previous-debt collection: panel open + amount typed by the driver ("" = not collecting)
-  const [debtOpen, setDebtOpen] = useState(false);
-  const [debtAmount, setDebtAmount] = useState("");
-  const [settleMethod, setSettleMethod] = useState<Method>("cash");
 
   const qc = useQueryClient();
   const save = useServerFn(saveDeliveryVisit);
@@ -129,15 +126,13 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
     setRetQty(Object.fromEntries(d.returns.map((r: any) => [r.product_id, r.quantity])));
     if (d.payment) {
       setMethod(d.payment.method as Method);
-      setPayStatus(d.payment.status as PayStatus);
+      // Partially paid sale: show what was received so far. Fully paid: keep the default.
+      setReceived(d.payment.status === "pending" ? String(d.payment.amount_paid ?? 0) : null);
     } else {
       setMethod("cash");
-      setPayStatus("paid");
+      setReceived(null);
     }
     setShowPayment(false);
-    setDebtOpen(false);
-    setDebtAmount("");
-    setSettleMethod("cash");
     setExistingPhotoUrl(null);
     if (d.delivery?.photo_url) {
       viewUrls({ data: { bucket: "delivery-photos", paths: [d.delivery.photo_url] } })
@@ -203,20 +198,22 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           failure_photo_path: status === "failed" ? failurePhotoPath : null,
           items: status === "delivered" ? items : [],
           returns,
-          payment: { method, status: payStatus },
+          payment: salePaidFull
+            ? { method, status: "paid" as const }
+            : { method, status: "pending" as const, amount_paid: saleCover },
           location,
         },
       });
 
       // Previous debt collected (full or partial): recorded as its own payment AFTER
       // the visit is saved, so a failure here never loses the sale.
-      if (collecting > 0) {
+      if (debtPaid > 0) {
         try {
           const res = await collectDebt({
             data: {
               customer_id: customer.id,
-              amount: collecting,
-              method: settleMethod === "credit" ? "other" : settleMethod,
+              amount: debtPaid,
+              method: method === "credit" ? "other" : method,
             },
           });
           return { debt: res };
@@ -246,11 +243,18 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   if (!customer) return null;
   const isDelivered = status === "delivered";
   const pendingBalance = Math.round((customer.pending_balance ?? 0) * 100) / 100;
-  const debtNum = Number(debtAmount.replace(",", "."));
-  const debtInvalid = debtOpen && debtAmount !== "" && (!Number.isFinite(debtNum) || debtNum <= 0 || debtNum > pendingBalance + 0.005);
-  const collecting = debtOpen && debtAmount !== "" && !debtInvalid ? Math.round(debtNum * 100) / 100 : 0;
-  const debtRemaining = Math.max(0, Math.round((pendingBalance - collecting) * 100) / 100);
-  const debtChips = [100, 200, 500].filter((v) => v < pendingBalance);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const saleTotal = isDelivered ? round2(total) : 0;
+  const totalDue = round2(saleTotal + pendingBalance);
+  const receivedStr = received ?? (saleTotal > 0 ? String(saleTotal) : "");
+  const receivedNum = receivedStr === "" ? 0 : Number(receivedStr.replace(",", "."));
+  const receivedInvalid = !Number.isFinite(receivedNum) || receivedNum < 0 || receivedNum > totalDue + 0.005;
+  const rec = receivedInvalid ? 0 : round2(receivedNum);
+  // Money goes to today's sale first; anything above it pays the old debt.
+  const saleCover = Math.min(rec, saleTotal);
+  const salePaidFull = saleTotal <= 0 || saleCover >= saleTotal - 0.005;
+  const debtPaid = round2(Math.max(0, rec - saleTotal));
+  const stillOwed = round2(totalDue - rec);
 
   return (
     <>
@@ -447,7 +451,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                 <span className="flex items-center gap-2">
                   Método de pago
                   <span className="text-xs font-normal text-muted-foreground">
-                    ({METHODS.find((m) => m.value === method)?.label ?? "Efectivo"} · {payStatus === "paid" ? "Pagado" : "Pendiente"})
+                    ({METHODS.find((m) => m.value === method)?.label ?? "Efectivo"})
                   </span>
                 </span>
                 {showPayment
@@ -473,24 +477,6 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                         </button>
                       );
                     })}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["paid", "pending"] as PayStatus[]).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setPayStatus(s)}
-                        className={`py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
-                          payStatus === s
-                            ? s === "paid"
-                              ? "bg-emerald-600 text-white border-emerald-600"
-                              : "bg-amber-500 text-white border-amber-500"
-                            : "border-input bg-background"
-                        }`}
-                      >
-                        {s === "paid" ? "Pagado" : "Pendiente"}
-                      </button>
-                    ))}
                   </div>
                 </div>
               )}
@@ -589,123 +575,60 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
           {/* Fixed bottom bar */}
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
-            {pendingBalance > 0 && (
-              <div className="mb-2 rounded-lg border border-rose-200 dark:border-rose-800 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setDebtOpen((v) => !v)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-rose-50 dark:bg-rose-950/20"
-                >
-                  <div className="text-left">
-                    <div className="text-sm font-semibold text-rose-700 dark:text-rose-400">Debe de antes</div>
-                    <div className="text-lg font-bold tabular-nums text-rose-700 dark:text-rose-400 leading-tight">{fmt(pendingBalance)}</div>
-                  </div>
-                  <span className={`text-sm px-3 py-1.5 rounded-lg font-semibold transition-colors ${collecting > 0 ? "bg-emerald-600 text-white" : debtOpen ? "bg-rose-200 dark:bg-rose-800 text-rose-700 dark:text-rose-300" : "bg-rose-600 text-white"}`}>
-                    {collecting > 0 ? `Cobrando ${fmt(collecting)} ✓` : debtOpen ? "Cerrar" : "Cobrar deuda"}
-                  </span>
-                </button>
-                {debtOpen && (
-                  <div className="px-3 pb-3 pt-2.5 border-t border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/10 space-y-2.5">
-                    <p className="text-sm font-medium text-rose-800 dark:text-rose-300">¿Cuánto te pagó de lo que debía?</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setDebtAmount(String(pendingBalance))}
-                        className={`px-3 py-2 rounded-lg border-2 text-sm font-semibold ${collecting === pendingBalance ? "bg-emerald-600 text-white border-emerald-600" : "border-input bg-background"}`}
-                      >
-                        Todo {fmt(pendingBalance)}
-                      </button>
-                      {debtChips.map((v) => (
-                        <button
-                          key={v}
-                          type="button"
-                          onClick={() => setDebtAmount(String(v))}
-                          className={`px-3 py-2 rounded-lg border-2 text-sm font-semibold ${collecting === v ? "bg-emerald-600 text-white border-emerald-600" : "border-input bg-background"}`}
-                        >
-                          {fmt(v)}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground shrink-0">Otro monto $</span>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        value={debtAmount}
-                        onChange={(e) => setDebtAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="h-11 text-lg font-semibold tabular-nums"
-                      />
-                    </div>
-                    {debtInvalid && (
-                      <p className="text-sm font-medium text-rose-600">
-                        {debtNum > pendingBalance ? `No puede ser más de ${fmt(pendingBalance)}.` : "Escribe un monto válido."}
-                      </p>
-                    )}
-                    {collecting > 0 && (
-                      <>
-                        <div>
-                          <p className="text-xs text-rose-700 dark:text-rose-400 mb-1.5">¿Cómo te pagó?</p>
-                          <div className="grid grid-cols-3 gap-1.5">
-                            {METHODS.filter((m) => m.value !== "credit").map((m) => {
-                              const active = settleMethod === m.value;
-                              return (
-                                <button
-                                  key={m.value}
-                                  type="button"
-                                  onClick={() => setSettleMethod(m.value)}
-                                  className={`flex flex-col items-center gap-1 px-1 py-2 rounded-lg border-2 text-xs font-medium transition-colors ${
-                                    active ? "bg-emerald-600 text-white border-emerald-600" : "border-input bg-background"
-                                  }`}
-                                >
-                                  <Icon icon={m.icon} className="h-4 w-4" />
-                                  {m.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <p className="text-sm font-semibold text-rose-700 dark:text-rose-400">
-                          {debtRemaining > 0 ? `Después de esto aún debe ${fmt(debtRemaining)}` : "Con esto queda sin deuda ✓"}
-                        </p>
-                      </>
-                    )}
-                    {collecting > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setDebtAmount("")}
-                        className="text-xs text-muted-foreground underline"
-                      >
-                        No cobrar deuda ahora
-                      </button>
-                    )}
+            {(saleTotal > 0 || pendingBalance > 0) && (
+              <div className="mb-2.5 rounded-xl border bg-card px-3 py-2.5 space-y-2">
+                {saleTotal > 0 && pendingBalance > 0 && (
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>Venta de hoy</span>
+                    <span className="tabular-nums">{fmt(saleTotal)}</span>
                   </div>
                 )}
-              </div>
-            )}
-            {isDelivered && (total > 0 || collecting > 0) && (
-              <div className="mb-2.5 px-1 space-y-0.5">
-                {total > 0 && collecting > 0 && (
-                  <>
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>Venta de hoy</span>
-                      <span className="tabular-nums">{fmt(total)}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>Cobro de deuda anterior</span>
-                      <span className="tabular-nums">{fmt(collecting)}</span>
-                    </div>
-                  </>
+                {pendingBalance > 0 && (
+                  <div className="flex items-center justify-between text-sm font-medium text-rose-600">
+                    <span>Debe de antes</span>
+                    <span className="tabular-nums">{fmt(pendingBalance)}</span>
+                  </div>
                 )}
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-muted-foreground">Total a cobrar</span>
-                  <span className="text-xl font-bold tabular-nums text-primary">{fmt(total + collecting)}</span>
+                  <span className="text-sm font-medium">Total a pagar</span>
+                  <span className="text-xl font-bold tabular-nums text-primary">{fmt(totalDue)}</span>
                 </div>
-                {debtRemaining > 0 && pendingBalance > 0 && (
-                  <p className="text-xs text-rose-600 text-right">
-                    Quedará debiendo de antes: {fmt(debtRemaining)}
+                <div className="flex items-center gap-2 border-t pt-2">
+                  <label htmlFor="received" className="text-sm font-semibold shrink-0">Recibido $</label>
+                  <Input
+                    id="received"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={receivedStr}
+                    onChange={(e) => setReceived(e.target.value)}
+                    placeholder="0.00"
+                    className="h-12 text-xl font-bold tabular-nums"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => setReceived("0")}
+                    className="px-3 py-1.5 rounded-lg border text-xs font-semibold">Nada</button>
+                  {saleTotal > 0 && pendingBalance > 0 && (
+                    <button type="button" onClick={() => setReceived(null)}
+                      className="px-3 py-1.5 rounded-lg border text-xs font-semibold">Solo la venta</button>
+                  )}
+                  <button type="button" onClick={() => setReceived(String(totalDue))}
+                    className="px-3 py-1.5 rounded-lg border text-xs font-semibold">Todo {fmt(totalDue)}</button>
+                </div>
+                {receivedInvalid ? (
+                  <p className="text-sm font-semibold text-rose-600">
+                    {receivedNum > totalDue ? `No puede ser más de ${fmt(totalDue)}.` : "Escribe un monto válido."}
+                  </p>
+                ) : stillOwed <= 0.004 ? (
+                  <p className="text-sm font-semibold text-emerald-600">Todo pagado ✓</p>
+                ) : (
+                  <p className="text-sm font-semibold text-rose-600">
+                    Queda debiendo {fmt(stillOwed)}
+                    {debtPaid > 0 && (
+                      <span className="font-normal text-muted-foreground"> · incluye {fmt(debtPaid)} de deuda anterior</span>
+                    )}
                   </p>
                 )}
               </div>
@@ -722,7 +645,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
               <Button
                 className="flex-2 flex-[2] h-12 font-semibold"
                 onClick={() => mut.mutate()}
-                disabled={mut.isPending || debtInvalid || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
+                disabled={mut.isPending || receivedInvalid || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
               >
                 {mut.isPending ? "Guardando…" : "Guardar"}
               </Button>
