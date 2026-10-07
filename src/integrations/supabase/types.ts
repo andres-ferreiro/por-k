@@ -1279,6 +1279,14 @@ export type Database = {
         Returns: undefined
       }
       current_branch_id: { Args: never; Returns: string }
+      settle_customer_balance: {
+        Args: {
+          p_customer_id: string
+          p_method?: Database["public"]["Enums"]["payment_method"]
+          p_note?: string
+        }
+        Returns: number
+      }
       get_price_for: {
         Args: { _customer_id: string; _product_id: string }
         Returns: number

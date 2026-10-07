@@ -246,29 +246,16 @@ export const markPendingBalancePaid = createServerFn({ method: "POST" })
       return { ok: true, cleared: 0 };
     }
 
-    const clearedAmount = Number(customer.pending_balance);
+    // The database clears the previous balance (everything except today's sales)
+    // as an administrative adjustment, marks the older unpaid sales as paid and
+    // keeps the customer statement consistent. Role checks also run inside.
+    const { data: cleared, error: settleErr } = await context.supabase.rpc("settle_customer_balance", {
+      p_customer_id: data.customer_id,
+      p_note: "Saldo saldado por administracion",
+    });
+    if (settleErr) throw new Error(settleErr.message);
 
-    // Supervisors only have SELECT on payments (no UPDATE policy), so use
-    // supabaseAdmin for the payments UPDATE. Owner has full access, but this
-    // path is safe for both since auth is already verified above.
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-    const { error: payErr } = await supabaseAdmin
-      .from("payments")
-      .update({ status: "paid" })
-      .eq("customer_id", data.customer_id)
-      .eq("status", "pending")
-      .eq("carried_over", true);
-    if (payErr) throw new Error(payErr.message);
-
-    // Zero out the pending balance
-    const { error: balErr } = await supabaseAdmin
-      .from("customers")
-      .update({ pending_balance: 0 })
-      .eq("id", data.customer_id);
-    if (balErr) throw new Error(balErr.message);
-
-    return { ok: true, cleared: clearedAmount };
+    return { ok: true, cleared: Number(cleared ?? 0) };
   });
 
 // Returns a signed upload URL the client can PUT to, plus the future public path.

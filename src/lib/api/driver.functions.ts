@@ -1142,53 +1142,17 @@ export const settlePendingBalance = createServerFn({ method: "POST" })
 
     await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
 
-    // Read current pending_balance
-    const { data: customer, error: cErr } = await supabase
-      .from("customers")
-      .select("id, pending_balance")
-      .eq("id", data.customer_id)
-      .maybeSingle();
-    if (cErr) throw new Error(cErr.message);
-    if (!customer) throw new Error("Cliente no encontrado.");
-
-    const balance = Number(customer.pending_balance ?? 0);
-    if (balance <= 0) return { ok: true, amount: 0 };
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-    // Record a payment for the settled amount (driver_id = current driver → covered by RLS)
-    const { error: payErr } = await supabase.from("payments").insert({
-      branch_id: route.branch_id,
-      route_id: route.id,
-      customer_id: data.customer_id,
-      driver_id: userId,
-      amount: Number(balance.toFixed(2)),
-      status: "paid",
-      method: data.method,
-      note: "Saldo pendiente saldado",
+    // The database does the accounting atomically: it records the payment for the
+    // previous balance (everything except today's sales), marks the older unpaid
+    // sales as paid and keeps the customer statement consistent.
+    const { data: settled, error: settleErr } = await supabase.rpc("settle_customer_balance", {
+      p_customer_id: data.customer_id,
+      p_method: data.method === "credit" ? "other" : data.method,
+      p_note: "Saldo pendiente saldado",
     });
-    if (payErr) throw new Error(payErr.message);
+    if (settleErr) throw new Error(settleErr.message);
 
-    // Mark all carried-over pending payments as paid.
-    // These may belong to other drivers, so use supabaseAdmin to bypass the
-    // "driver_id = auth.uid()" RLS restriction on the payments table.
-    const { error: updErr } = await supabaseAdmin
-      .from("payments")
-      .update({ status: "paid" })
-      .eq("customer_id", data.customer_id)
-      .eq("status", "pending")
-      .eq("carried_over", true);
-    if (updErr) throw new Error(updErr.message);
-
-    // Zero out pending_balance. Drivers have no UPDATE policy on customers,
-    // so use supabaseAdmin here as well.
-    const { error: balErr } = await supabaseAdmin
-      .from("customers")
-      .update({ pending_balance: 0 })
-      .eq("id", data.customer_id);
-    if (balErr) throw new Error(balErr.message);
-
-    return { ok: true, amount: balance };
+    return { ok: true, amount: Number(settled ?? 0) };
   });
 
 // ============ DRIVER LIVE LOCATION ============
