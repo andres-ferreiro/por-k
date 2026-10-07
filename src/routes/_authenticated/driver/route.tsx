@@ -9,6 +9,9 @@ import { getMyRouteToday, publishDriverLocation } from "@/lib/api/driver.functio
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { DispatchWaitingCard } from "@/components/driver/dispatch-waiting";
+import { PrinterProvider } from "@/components/driver/printer-provider";
+import { ReceiptProvider } from "@/components/driver/receipt-provider";
+import { PrinterChip } from "@/components/driver/printer-chip";
 
 
 export const Route = createFileRoute("/_authenticated/driver")({
@@ -96,17 +99,22 @@ function DriverShell() {
   }
 
   return (
+    <PrinterProvider>
+    <ReceiptProvider>
     <div className="sm:flex sm:min-h-dvh sm:items-start sm:justify-center sm:bg-muted/30">
       <div className="flex h-dvh flex-col overflow-x-hidden bg-background sm:w-full sm:max-w-md sm:shadow-2xl sm:border-x sm:border-border">
-        <header className="sticky top-0 z-10 shrink-0 bg-primary text-primary-foreground px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between">
-          <div className="min-w-0">
+        <header className="sticky top-0 z-10 shrink-0 bg-primary text-primary-foreground px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
             <div className="text-xs text-primary-foreground/80">Repartidor</div>
             <div className="font-semibold text-lg leading-tight truncate">{ctx.fullName ?? ctx.email}</div>
             {ctx.branchName && <div className="text-xs text-primary-foreground/80 truncate">{ctx.branchName}</div>}
           </div>
-          <Button variant="ghost" size="icon" onClick={signOut} className="shrink-0 text-primary-foreground hover:bg-white/10">
-            <Icon icon={Logout01Icon} className="h-5 w-5" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <PrinterChip />
+            <Button variant="ghost" size="icon" onClick={signOut} className="shrink-0 text-primary-foreground hover:bg-white/10">
+              <Icon icon={Logout01Icon} className="h-5 w-5" />
+            </Button>
+          </div>
         </header>
 
         <main className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-5">
@@ -143,5 +151,7 @@ function DriverShell() {
         </nav>
       </div>
     </div>
+    </ReceiptProvider>
+    </PrinterProvider>
   );
 }

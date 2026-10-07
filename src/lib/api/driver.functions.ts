@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
+import { paymentSplit } from "@/lib/payment-split";
 import { deliveryNetTotals, deliveryPaymentAmount } from "@/lib/delivery-totals";
 import { assertSaleWithinStock, fetchDriverDayStock } from "@/lib/driver-stock";
 import { resolveDriverActiveRoute } from "@/lib/driver-route";
@@ -97,6 +98,50 @@ type RouteRow = {
   route_mode: "dispatch" | "preorder";
 };
 
+/**
+ * Since the account ledger, customers.pending_balance already includes today's
+ * unpaid sales. The visit screen has always meant "previous debt" by that field
+ * (today's sale is added on top), so subtract today's outstanding here.
+ * Read-only: nothing is written.
+ */
+/** Unpaid amount of today's sales per customer (read-only). */
+async function todayOutstandingByCustomer(
+  supabase: any,
+  customerIds: string[],
+  today: string,
+): Promise<Map<string, number> | null> {
+  const out = new Map<string, number>();
+  if (customerIds.length === 0) return out;
+  const { startISO } = tzDayRange(today);
+  const { data, error } = await supabase
+    .from("payments")
+    .select("customer_id, amount, amount_paid")
+    .in("customer_id", customerIds)
+    .eq("status", "pending")
+    .eq("is_abono", false)
+    .eq("carried_over", false)
+    .gte("paid_at", startISO);
+  if (error || !data) return null;
+  for (const p of data as any[]) {
+    out.set(p.customer_id, (out.get(p.customer_id) ?? 0) + Number(p.amount) - Number(p.amount_paid));
+  }
+  return out;
+}
+
+async function withPreviousBalance<T extends { id: string; pending_balance: number }>(
+  supabase: any,
+  customers: T[],
+  today: string,
+): Promise<T[]> {
+  const ids = customers.filter((c) => c.pending_balance > 0).map((c) => c.id);
+  const todayOut = await todayOutstandingByCustomer(supabase, ids, today);
+  if (!todayOut) return customers; // fail open: show the raw balance as before
+  return customers.map((c) => ({
+    ...c,
+    pending_balance: Math.max(0, Math.round((c.pending_balance - (todayOut.get(c.id) ?? 0)) * 100) / 100),
+  }));
+}
+
 function mapCustomerRow(
   r: { position: number; customers: any },
   delMap: Map<string, any>,
@@ -182,7 +227,7 @@ async function loadRouteCustomersWithStops(
 
   const delMap = new Map(deliveries.map((d: any) => [d.customer_id, d]));
   const orderMap = new Map(orders.map((o: any) => [o.customer_id, o]));
-  return (rc ?? []).map((r: any) => mapCustomerRow(r, delMap, orderMap));
+  return withPreviousBalance(supabase, ((rc ?? []) as any[]).map((r) => mapCustomerRow(r, delMap, orderMap)), today);
 }
 
 function toRouteRow(route: any): RouteRow {
@@ -254,7 +299,7 @@ export const getMyRouteToday = createServerFn({ method: "GET" })
       }
       const delMap = new Map(deliveries.map((d: any) => [d.customer_id, d]));
       const orderMap = new Map<string, any>();
-      const customers = (rc ?? []).map((r: any) => mapCustomerRow(r, delMap, orderMap));
+      const customers = await withPreviousBalance(supabase, ((rc ?? []) as any[]).map((r) => mapCustomerRow(r, delMap, orderMap)), today);
 
       dispatchBlock = {
         route: toRouteRow(dispatchRoute),
@@ -414,14 +459,14 @@ export const getTodayDeliveryDetail = createServerFn({ method: "POST" })
     const [{ data: items }, { data: rets }, { data: pay }] = await Promise.all([
       supabase.from("delivery_items").select("product_id, quantity, unit_price").eq("delivery_id", del.id),
       supabase.from("delivery_returns").select("product_id, quantity").eq("delivery_id", del.id),
-      supabase.from("payments").select("id, amount, method, status").eq("delivery_id", del.id).maybeSingle(),
+      supabase.from("payments").select("id, amount, amount_paid, method, status").eq("delivery_id", del.id).maybeSingle(),
     ]);
 
     return {
       delivery: { id: del.id, status: del.status, comment: del.comment, photo_url: del.photo_url, failure_reason: del.failure_reason, failure_photo_url: del.failure_photo_url },
       items: (items ?? []).map((i: any) => ({ product_id: i.product_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
       returns: (rets ?? []).map((r: any) => ({ product_id: r.product_id, quantity: Number(r.quantity) })),
-      payment: pay ? { method: pay.method, status: pay.status, amount: Number(pay.amount) } : null,
+      payment: pay ? { method: pay.method, status: pay.status, amount: Number(pay.amount), amount_paid: Number((pay as any).amount_paid ?? 0) } : null,
     };
   });
 
@@ -442,6 +487,8 @@ const saveDeliveryVisitSchema = z.object({
   payment: z.object({
     method: z.enum(["cash", "transfer", "credit", "other"]),
     status: z.enum(["paid", "pending"]),
+    // Only sent when the sale is NOT fully paid: how much of it was received (partial payment).
+    amount_paid: z.number().min(0).max(10_000_000).optional(),
   }),
   location: z
     .object({
@@ -588,6 +635,10 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
         amount: Number(total.toFixed(2)),
         method: data.payment.method,
         status: data.payment.status,
+        // Partial payment: the DB trigger keeps status/ledger/balance in sync from amount_paid.
+        ...(data.payment.status === "pending" && data.payment.amount_paid !== undefined
+          ? { amount_paid: Math.min(Number(data.payment.amount_paid.toFixed(2)), Number(total.toFixed(2))) }
+          : {}),
       };
       if (existingPay) {
         const { error } = await supabase.from("payments").update(payRow).eq("id", existingPay.id);
@@ -739,7 +790,7 @@ export const listTodayPayments = createServerFn({ method: "POST" })
     const { data: rows, error } = await supabase
       .from("payments")
       .select(
-        "id, amount, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
+        "id, amount, amount_paid, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
       )
       .eq("driver_id", userId)
       .gte("paid_at", startISO)
@@ -754,9 +805,12 @@ export const listTodayPayments = createServerFn({ method: "POST" })
         line_total?: number;
       }>;
       const returns = (r.deliveries?.delivery_returns ?? []) as Array<{ product_id: string; quantity: number }>;
+      const amount = deliveryPaymentAmount(Number(r.amount), items, returns);
       return {
         id: r.id as string,
-        amount: deliveryPaymentAmount(Number(r.amount), items, returns),
+        amount,
+        /** part of `amount` already received (== amount when paid) */
+        collected: paymentSplit(r, amount).collected,
         status: r.status as "paid" | "pending",
         method: r.method as "cash" | "transfer" | "credit" | "other",
         note: (r.note as string | null) ?? null,
@@ -1153,6 +1207,63 @@ export const settlePendingBalance = createServerFn({ method: "POST" })
     if (settleErr) throw new Error(settleErr.message);
 
     return { ok: true, amount: Number(settled ?? 0) };
+  });
+
+// ============ COLLECT PREVIOUS DEBT (full or partial) ============
+
+// The driver collects some or all of the customer's PREVIOUS debt (balance minus
+// today's unpaid sales). Full amount -> same settle path as before (also marks the
+// older unpaid sales as paid). Partial -> a plain abono in the ledger.
+export const collectPreviousDebt = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      customer_id: z.string().uuid(),
+      amount: z.number().positive().max(10_000_000),
+      method: z.enum(["cash", "transfer", "other"]),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const today = todayStr();
+
+    const route = await resolveDriverActiveRoute(supabase, userId, today);
+    if (!route) throw new Error("No tienes una ruta asignada.");
+    await requireTodayDispatchIfEnabled(supabase, route.id, userId, route.branch_id, today);
+
+    const { data: customer, error: cErr } = await supabase
+      .from("customers").select("id, pending_balance").eq("id", data.customer_id).maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!customer) throw new Error("Cliente no encontrado.");
+
+    const todayOut = await todayOutstandingByCustomer(supabase, [data.customer_id], today);
+    if (!todayOut) throw new Error("No se pudo calcular la deuda anterior.");
+    const previous = Math.round((Number(customer.pending_balance ?? 0) - (todayOut.get(data.customer_id) ?? 0)) * 100) / 100;
+    const amount = Math.round(data.amount * 100) / 100;
+
+    if (previous <= 0) throw new Error("El cliente no tiene deuda anterior.");
+    if (amount > previous + 0.005) {
+      throw new Error(`El monto ($${amount.toFixed(2)}) es mayor a la deuda anterior ($${previous.toFixed(2)}).`);
+    }
+
+    if (Math.abs(amount - previous) < 0.005) {
+      const { error } = await supabase.rpc("settle_customer_balance", {
+        p_customer_id: data.customer_id,
+        p_method: data.method,
+        p_note: "Saldo pendiente saldado",
+      });
+      if (error) throw new Error(error.message);
+      return { ok: true as const, paid: previous, remaining: 0 };
+    }
+
+    const { error } = await (supabase as any).rpc("register_customer_payment", {
+      p_customer_id: data.customer_id,
+      p_amount: amount,
+      p_method: data.method,
+      p_note: "Abono a deuda anterior",
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true as const, paid: amount, remaining: Math.round((previous - amount) * 100) / 100 };
   });
 
 // ============ DRIVER LIVE LOCATION ============

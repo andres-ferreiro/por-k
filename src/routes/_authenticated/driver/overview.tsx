@@ -7,6 +7,7 @@ import {
   CreditCardIcon,
   Loading03Icon,
   MoreHorizontalIcon,
+  PrinterIcon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { createFileRoute } from "@tanstack/react-router";
@@ -18,6 +19,8 @@ import { deliveryStatusTone } from "@/lib/badge-tones";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { useState } from "react";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
+import { Button } from "@/components/ui/button";
+import { useReceipt } from "@/components/driver/receipt-provider";
 import { fmtMoney } from "@/lib/format";
 import { useDashboardPeriod, type Period } from "@/hooks/use-dashboard-period";
 import { cn } from "@/lib/utils";
@@ -96,6 +99,7 @@ function ProgressRing({ value, max, size = 80 }: { value: number; max: number; s
 }
 
 function Page() {
+  const { showReceipt } = useReceipt();
   const fetchDeliveries = useServerFn(listTodayDeliveries);
   const fetchPayments = useServerFn(listTodayPayments);
   const fetchExpenses = useServerFn(listTodayExpenses);
@@ -144,11 +148,12 @@ function Page() {
   const totalExpenses = exps.reduce((s, e) => s + e.amount, 0);
   const saldoALiquidar = totalSold - totalExpenses;  // totalSold is already net-of-returns
 
-  const totalPaid = pays.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0);
+  // collected = amount already received (a partially paid sale counts its received part)
+  const totalPaid = pays.reduce((s, p) => s + p.collected, 0);
 
   const byMethod: Record<string, number> = {};
   for (const p of pays) {
-    if (p.status === "paid") byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount;
+    if (p.collected > 0) byMethod[p.method] = (byMethod[p.method] ?? 0) + p.collected;
   }
 
   const canEdit = (customerId: string) => !!route?.customers.find((c) => c.id === customerId);
@@ -298,7 +303,11 @@ function Page() {
                             <Icon icon={METHOD_ICON[pay.method] ?? BanknoteIcon} className="h-3 w-3" />
                             {METHOD_LABEL[pay.method] ?? pay.method}
                             {pay.status === "pending" && (
-                              <span className="ml-1 text-amber-600 font-medium">· Pendiente</span>
+                              <span className="ml-1 text-amber-600 font-medium">
+                                {pay.collected > 0
+                                  ? `· Parcial (cobrado ${fmtMoney(pay.collected)})`
+                                  : "· Pendiente"}
+                              </span>
                             )}
                           </span>
                         )}
@@ -307,6 +316,21 @@ function Page() {
                         )}
                       </div>
                     </div>
+                    {r.status === "delivered" && r.total > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-1.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showReceipt({ deliveryId: r.id });
+                        }}
+                      >
+                        <Icon icon={PrinterIcon} className="h-4 w-4" />
+                        Recibo
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               );

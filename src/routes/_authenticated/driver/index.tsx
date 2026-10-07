@@ -19,9 +19,11 @@ import {
   CallIcon,
   Cancel01Icon,
   Search01Icon,
+  PrinterIcon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
+import { useReceipt } from "@/components/driver/receipt-provider";
 import { LocationDrawer } from "@/components/driver/location-drawer";
 import { PreorderRoutePage, PreorderRouteLoading } from "@/components/driver/preorder-route-page";
 
@@ -144,6 +146,7 @@ function DispatchRoutePage({ data }: {
     require_dispatch: boolean;
   };
 }) {
+  const { showReceipt } = useReceipt();
   const getStock = useServerFn(getMyDispatchStock);
   const stockQ = useQuery({
     queryKey: ["driver", "dispatchStock"],
@@ -296,9 +299,22 @@ function DispatchRoutePage({ data }: {
                   )}
                 </div>
 
-                <Button onClick={() => setDeliveryFor(c)} className="w-full h-11">
-                  <Icon icon={PackageDelivered01Icon} className="h-4 w-4" /> Vender / Entregar
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => setDeliveryFor(c)} className="h-11 flex-1">
+                    <Icon icon={PackageDelivered01Icon} className="h-4 w-4" /> Vender / Entregar
+                  </Button>
+                  {c.delivery?.status === "delivered" && c.delivery.id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 shrink-0"
+                      onClick={() => showReceipt({ deliveryId: c.delivery!.id })}
+                    >
+                      <Icon icon={PrinterIcon} className="h-4 w-4" />
+                      Recibo
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           );

@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/driver.functions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReceipt } from "@/components/driver/receipt-provider";
 
 type Status = "delivered" | "failed";
 type FailureReason = "closed" | "other";
@@ -38,6 +39,7 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
 
   const qc = useQueryClient();
+  const { showReceipt } = useReceipt();
   const confirm = useServerFn(confirmPreorderDelivery);
   const getDetail = useServerFn(getPreorderDeliveryDetail);
   const viewUrls = useServerFn(getPhotoViewUrls);
@@ -94,11 +96,17 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
           comment: comment || null,
         },
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // Only offer the receipt the first time the order is confirmed as delivered,
+      // not when the driver just adds or replaces the note photo afterwards.
+      const firstDelivery = status === "delivered" && detailQ.data?.delivery?.status !== "delivered";
       qc.invalidateQueries({ queryKey: ["driver", "myRouteToday"] });
       qc.invalidateQueries({ queryKey: ["driver", "preorderDetail", customer?.id] });
       toast.success(status === "delivered" ? "Entrega confirmada" : "Entrega marcada como fallida");
       onOpenChange(false);
+      if (firstDelivery && res?.delivery_id && Number(res.total) > 0) {
+        setTimeout(() => showReceipt({ deliveryId: res.delivery_id as string }), 350);
+      }
     },
     onError: (e: any) => toast.error(e?.message ?? "Error"),
   });
@@ -212,6 +220,19 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
 
               {isDelivered && (
                 <div className="space-y-3">
+                  {detailQ.data?.delivery?.id && (
+                    <Button
+                      variant="outline"
+                      className="w-full h-11"
+                      onClick={() => {
+                        const id = detailQ.data!.delivery!.id as string;
+                        onOpenChange(false);
+                        setTimeout(() => showReceipt({ deliveryId: id }), 350);
+                      }}
+                    >
+                      Ver / imprimir recibo
+                    </Button>
+                  )}
                   {existingPhotoUrl && (
                     <div className="space-y-2">
                       <p className="text-sm font-medium">Nota entregada</p>

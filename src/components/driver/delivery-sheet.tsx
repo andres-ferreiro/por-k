@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { PhotoCapture } from "@/components/driver/photo-capture";
 import { QuantityKeypad } from "@/components/driver/quantity-keypad";
 import { useServerFn } from "@tanstack/react-start";
@@ -26,17 +27,17 @@ import {
   getCustomerPricedProducts,
   getTodayDeliveryDetail,
   getPhotoViewUrls,
-  settlePendingBalance,
+  collectPreviousDebt,
 } from "@/lib/api/driver.functions";
 import { getMyDispatchStock } from "@/lib/api/dispatches.functions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
+import { useReceipt } from "@/components/driver/receipt-provider";
 
 type Status = "delivered" | "pending" | "failed";
 type Method = "cash" | "transfer" | "credit" | "other";
-type PayStatus = "paid" | "pending";
 type FailureReason = "closed" | "no_order" | "other";
 
 interface Props {
@@ -70,18 +71,19 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const [qty, setQty] = useState<Record<string, number>>({});
   const [retQty, setRetQty] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<Method>("cash");
-  const [payStatus, setPayStatus] = useState<PayStatus>("paid");
+  // Money received at this visit as typed by the driver. null = not touched: defaults to
+  // "today's sale paid in full, old debt untouched" (the way the app has always worked).
+  const [received, setReceived] = useState<string | null>(null);
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [keypadFor, setKeypadFor] = useState<{ id: string; type: "sell" | "return"; name: string } | null>(null);
 
-  const [settlePending, setSettlePending] = useState(false);
-  const [settleMethod, setSettleMethod] = useState<Method>("cash");
 
   const qc = useQueryClient();
+  const { showReceipt } = useReceipt();
   const save = useServerFn(saveDeliveryVisit);
-  const settle = useServerFn(settlePendingBalance);
+  const collectDebt = useServerFn(collectPreviousDebt);
   const getProducts = useServerFn(getCustomerPricedProducts);
   const getDetail = useServerFn(getTodayDeliveryDetail);
   const viewUrls = useServerFn(getPhotoViewUrls);
@@ -126,14 +128,13 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
     setRetQty(Object.fromEntries(d.returns.map((r: any) => [r.product_id, r.quantity])));
     if (d.payment) {
       setMethod(d.payment.method as Method);
-      setPayStatus(d.payment.status as PayStatus);
+      // Partially paid sale: show what was received so far. Fully paid: keep the default.
+      setReceived(d.payment.status === "pending" ? String(d.payment.amount_paid ?? 0) : null);
     } else {
       setMethod("cash");
-      setPayStatus("paid");
+      setReceived(null);
     }
     setShowPayment(false);
-    setSettlePending(false);
-    setSettleMethod("cash");
     setExistingPhotoUrl(null);
     if (d.delivery?.photo_url) {
       viewUrls({ data: { bucket: "delivery-photos", paths: [d.delivery.photo_url] } })
@@ -189,7 +190,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
         }
       }
 
-      await save({
+      const saved = await save({
         data: {
           customer_id: customer.id,
           status,
@@ -199,29 +200,76 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           failure_photo_path: status === "failed" ? failurePhotoPath : null,
           items: status === "delivered" ? items : [],
           returns,
-          payment: { method, status: payStatus },
+          payment: salePaidFull
+            ? { method, status: "paid" as const }
+            : { method, status: "pending" as const, amount_paid: saleCover },
           location,
         },
       });
 
-      // If the driver is settling the pending balance, record it as a separate payment
-      if (settlePending && pendingBalance > 0) {
-        await settle({
-          data: { customer_id: customer.id, method: settleMethod },
-        });
+      // Previous debt collected (full or partial): recorded as its own payment AFTER
+      // the visit is saved, so a failure here never loses the sale.
+      let debt: { paid: number; remaining: number } | null = null;
+      if (debtPaid > 0) {
+        try {
+          debt = await collectDebt({
+            data: {
+              customer_id: customer.id,
+              amount: debtPaid,
+              method: method === "credit" ? "other" : method,
+            },
+          });
+        } catch (e: any) {
+          qc.invalidateQueries({ queryKey: ["driver"] });
+          throw new Error(`La visita se guardó, pero el cobro de la deuda NO: ${e?.message ?? "error"}. Revisa y guarda otra vez.`);
+        }
       }
+      return {
+        debt,
+        deliveryId: saved.delivery_id as string,
+        status,
+        total: Number(saved.total ?? 0),
+      };
     },
-    onSuccess: () => {
-      toast.success("Visita guardada.");
+    onSuccess: (result) => {
+      if (result?.debt) {
+        toast.success(
+          result.debt.remaining > 0
+            ? `Visita guardada. Cobraste ${fmt(result.debt.paid)} de deuda. Aún debe ${fmt(result.debt.remaining)}.`
+            : `Visita guardada. Deuda anterior saldada (${fmt(result.debt.paid)}).`,
+        );
+      } else {
+        toast.success("Visita guardada.");
+      }
       qc.invalidateQueries({ queryKey: ["driver"] });
       onOpenChange(false);
+      // Offer the customer receipt once the sale is saved. Small delay so this drawer
+      // finishes closing before the receipt drawer opens.
+      if (result && result.status === "delivered" && result.total > 0) {
+        setTimeout(
+          () => showReceipt({ deliveryId: result.deliveryId }),
+          350,
+        );
+      }
     },
     onError: (e: any) => toast.error(e?.message ?? "No se pudo guardar."),
   });
 
   if (!customer) return null;
   const isDelivered = status === "delivered";
-  const pendingBalance = customer.pending_balance ?? 0;
+  const pendingBalance = Math.round((customer.pending_balance ?? 0) * 100) / 100;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const saleTotal = isDelivered ? round2(total) : 0;
+  const totalDue = round2(saleTotal + pendingBalance);
+  const receivedStr = received ?? (saleTotal > 0 ? String(saleTotal) : "");
+  const receivedNum = receivedStr === "" ? 0 : Number(receivedStr.replace(",", "."));
+  const receivedInvalid = !Number.isFinite(receivedNum) || receivedNum < 0 || receivedNum > totalDue + 0.005;
+  const rec = receivedInvalid ? 0 : round2(receivedNum);
+  // Money goes to today's sale first; anything above it pays the old debt.
+  const saleCover = Math.min(rec, saleTotal);
+  const salePaidFull = saleTotal <= 0 || saleCover >= saleTotal - 0.005;
+  const debtPaid = round2(Math.max(0, rec - saleTotal));
+  const stillOwed = round2(totalDue - rec);
 
   return (
     <>
@@ -418,7 +466,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                 <span className="flex items-center gap-2">
                   Método de pago
                   <span className="text-xs font-normal text-muted-foreground">
-                    ({METHODS.find((m) => m.value === method)?.label ?? "Efectivo"} · {payStatus === "paid" ? "Pagado" : "Pendiente"})
+                    ({METHODS.find((m) => m.value === method)?.label ?? "Efectivo"})
                   </span>
                 </span>
                 {showPayment
@@ -444,24 +492,6 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                         </button>
                       );
                     })}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["paid", "pending"] as PayStatus[]).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setPayStatus(s)}
-                        className={`py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
-                          payStatus === s
-                            ? s === "paid"
-                              ? "bg-emerald-600 text-white border-emerald-600"
-                              : "bg-amber-500 text-white border-amber-500"
-                            : "border-input bg-background"
-                        }`}
-                      >
-                        {s === "paid" ? "Pagado" : "Pendiente"}
-                      </button>
-                    ))}
                   </div>
                 </div>
               )}
@@ -560,50 +590,62 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
           {/* Fixed bottom bar */}
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
-            {pendingBalance > 0 && (
-              <div className="mb-2 rounded-lg border border-rose-200 dark:border-rose-800 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setSettlePending((v) => !v)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-rose-50 dark:bg-rose-950/20"
-                >
-                  <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo pendiente</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmt(pendingBalance)}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium transition-colors ${settlePending ? "bg-emerald-600 text-white" : "bg-rose-200 dark:bg-rose-800 text-rose-700 dark:text-rose-300"}`}>
-                      {settlePending ? "Cobrado ✓" : "Cobrar"}
-                    </span>
-                  </div>
-                </button>
-                {settlePending && (
-                  <div className="px-3 pb-2.5 pt-2 border-t border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/10">
-                    <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">Método para el saldo pendiente:</p>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {METHODS.map((m) => {
-                        const active = settleMethod === m.value;
-                        return (
-                          <button
-                            key={m.value}
-                            type="button"
-                            onClick={() => setSettleMethod(m.value)}
-                            className={`flex flex-col items-center gap-1 px-1 py-2 rounded-lg border-2 text-[11px] font-medium transition-colors ${
-                              active ? "bg-emerald-600 text-white border-emerald-600" : "border-input bg-background"
-                            }`}
-                          >
-                            <Icon icon={m.icon} className="h-4 w-4" />
-                            {m.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+            {(saleTotal > 0 || pendingBalance > 0) && (
+              <div className="mb-2.5 rounded-xl border bg-card px-3 py-2.5 space-y-2">
+                {saleTotal > 0 && pendingBalance > 0 && (
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>Venta de hoy</span>
+                    <span className="tabular-nums">{fmt(saleTotal)}</span>
                   </div>
                 )}
-              </div>
-            )}
-            {isDelivered && total > 0 && (
-              <div className="flex items-center justify-between mb-2.5 px-1">
-                <span className="text-sm text-muted-foreground">Total a cobrar</span>
-                <span className="text-xl font-bold tabular-nums text-primary">{fmt(total + (settlePending ? pendingBalance : 0))}</span>
+                {pendingBalance > 0 && (
+                  <div className="flex items-center justify-between text-sm font-medium text-rose-600">
+                    <span>Debe de antes</span>
+                    <span className="tabular-nums">{fmt(pendingBalance)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Total a pagar</span>
+                  <span className="text-xl font-bold tabular-nums text-primary">{fmt(totalDue)}</span>
+                </div>
+                <div className="flex items-center gap-2 border-t pt-2">
+                  <label htmlFor="received" className="text-sm font-semibold shrink-0">Recibido $</label>
+                  <Input
+                    id="received"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={receivedStr}
+                    onChange={(e) => setReceived(e.target.value)}
+                    placeholder="0.00"
+                    className="h-12 text-xl font-bold tabular-nums"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => setReceived("0")}
+                    className="px-3 py-1.5 rounded-lg border text-xs font-semibold">Nada</button>
+                  {saleTotal > 0 && pendingBalance > 0 && (
+                    <button type="button" onClick={() => setReceived(null)}
+                      className="px-3 py-1.5 rounded-lg border text-xs font-semibold">Solo la venta</button>
+                  )}
+                  <button type="button" onClick={() => setReceived(String(totalDue))}
+                    className="px-3 py-1.5 rounded-lg border text-xs font-semibold">Todo {fmt(totalDue)}</button>
+                </div>
+                {receivedInvalid ? (
+                  <p className="text-sm font-semibold text-rose-600">
+                    {receivedNum > totalDue ? `No puede ser más de ${fmt(totalDue)}.` : "Escribe un monto válido."}
+                  </p>
+                ) : stillOwed <= 0.004 ? (
+                  <p className="text-sm font-semibold text-emerald-600">Todo pagado ✓</p>
+                ) : (
+                  <p className="text-sm font-semibold text-rose-600">
+                    Queda debiendo {fmt(stillOwed)}
+                    {debtPaid > 0 && (
+                      <span className="font-normal text-muted-foreground"> · incluye {fmt(debtPaid)} de deuda anterior</span>
+                    )}
+                  </p>
+                )}
               </div>
             )}
             <div className="flex gap-2">
@@ -618,7 +660,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
               <Button
                 className="flex-2 flex-[2] h-12 font-semibold"
                 onClick={() => mut.mutate()}
-                disabled={mut.isPending || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
+                disabled={mut.isPending || receivedInvalid || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
               >
                 {mut.isPending ? "Guardando…" : "Guardar"}
               </Button>

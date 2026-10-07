@@ -934,6 +934,8 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          amount_paid: number
+          is_abono: boolean
           branch_id: string
           carried_over: boolean
           created_at: string
@@ -950,6 +952,8 @@ export type Database = {
         }
         Insert: {
           amount: number
+          amount_paid?: number
+          is_abono?: boolean
           branch_id: string
           carried_over?: boolean
           created_at?: string
@@ -966,6 +970,8 @@ export type Database = {
         }
         Update: {
           amount?: number
+          amount_paid?: number
+          is_abono?: boolean
           branch_id?: string
           carried_over?: boolean
           created_at?: string

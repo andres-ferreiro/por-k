@@ -132,7 +132,7 @@ function DeliveriesPage() {
         devueltas: r.return_units,
         total: r.total,
         pago_metodo: r.payment ? methodLabel[r.payment.method] : "",
-        pago_estado: r.payment ? (r.payment.status === "paid" ? "Pagado" : "Pendiente") : "",
+        pago_estado: r.payment ? (r.payment.status === "paid" ? "Pagado" : r.payment.status === "partial" ? "Parcial" : "Pendiente") : "",
       })),
     );
   }
@@ -354,6 +354,9 @@ function DeliveryDetailDialog({ id, onClose }: { id: string | null; onClose: () 
                   <PaymentStatusBadge status={data.payment.status} />
                   <StatusBadge tone="neutral">{methodLabel[data.payment.method]}</StatusBadge>
                   <span className="font-medium tabular-nums">{fmtMoney(data.payment.amount)}</span>
+                  {data.payment.status === "partial" && (
+                    <span className="text-xs text-emerald-600">Cobrado {fmtMoney(data.payment.collected)}</span>
+                  )}
                   <span className="text-muted-foreground text-xs">
                     {new Date(data.payment.paid_at).toLocaleString(APP_LOCALE, { timeZone: APP_TZ })}
                   </span>
