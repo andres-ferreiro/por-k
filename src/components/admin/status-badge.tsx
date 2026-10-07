@@ -38,10 +38,10 @@ export function ActiveStatusBadge({
   );
 }
 
-export function PaymentStatusBadge({ status }: { status: "paid" | "pending" | string }) {
+export function PaymentStatusBadge({ status }: { status: "paid" | "pending" | "partial" | string }) {
   return (
-    <StatusBadge tone={status === "paid" ? "success" : "warning"}>
-      {status === "paid" ? "Pagado" : "Pendiente"}
+    <StatusBadge tone={status === "paid" ? "success" : status === "partial" ? "info" : "warning"}>
+      {status === "paid" ? "Pagado" : status === "partial" ? "Parcial" : "Pendiente"}
     </StatusBadge>
   );
 }

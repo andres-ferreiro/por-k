@@ -114,7 +114,7 @@ function PaymentsPage() {
         cliente: r.customer_name ?? "",
         monto: r.amount,
         metodo: methodLabel[r.method] ?? r.method,
-        estado: r.status === "paid" ? "Pagado" : "Pendiente",
+        estado: r.status === "paid" ? "Pagado" : r.collected > 0 ? "Parcial" : "Pendiente",
         origen: r.from_delivery ? "Venta entrega" : "Abono manual",
         nota: r.note ?? "",
       })),
@@ -232,7 +232,7 @@ function PaymentsPage() {
                 <TableCell>{r.route_name ?? "—"}</TableCell>
                 <TableCell>{r.driver_name ?? "—"}</TableCell>
                 <TableCell>{methodLabel[r.method] ?? r.method}</TableCell>
-                <TableCell><PaymentStatusBadge status={r.status} /></TableCell>
+                <TableCell><PaymentStatusBadge status={r.status === "pending" && r.collected > 0 ? "partial" : r.status} /></TableCell>
                 <TableCell>
                   <StatusBadge tone={r.from_delivery ? "info" : "neutral"}>
                     {r.from_delivery ? "Venta entrega" : "Abono manual"}

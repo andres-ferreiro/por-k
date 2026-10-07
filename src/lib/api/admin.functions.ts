@@ -1,4 +1,4 @@
-import { paymentSplit } from "@/lib/payment-split";
+import { paymentSplit, paymentDisplayStatus } from "@/lib/payment-split";
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
@@ -565,7 +565,7 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
     let q = context.supabase
       .from("deliveries")
       .select(
-        "id, delivery_date, created_at, status, comment, failure_reason, route_id, driver_id, customer_id, routes(name, route_mode), customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, method, status, delivery_id)",
+        "id, delivery_date, created_at, status, comment, failure_reason, route_id, driver_id, customer_id, routes(name, route_mode), customers(name), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, amount_paid, method, status, delivery_id)",
       )
       .gte("delivery_date", data.date_from)
       .lte("delivery_date", data.date_to)
@@ -613,7 +613,8 @@ export const listDeliveriesAdmin = createServerFn({ method: "POST" })
           ? {
               amount: totals.netAmount,
               method: pay.method as string,
-              status: pay.status as "paid" | "pending",
+              status: paymentDisplayStatus(pay),
+              collected: paymentSplit(pay, totals.netAmount).collected,
             }
           : null,
       };
@@ -646,7 +647,7 @@ export const getDeliveryDetailAdmin = createServerFn({ method: "POST" })
         .eq("delivery_id", data.id),
       supabase
         .from("payments")
-        .select("id, amount, method, status, paid_at, note")
+        .select("id, amount, amount_paid, method, status, paid_at, note")
         .eq("delivery_id", data.id)
         .maybeSingle(),
     ]);
@@ -688,8 +689,9 @@ export const getDeliveryDetailAdmin = createServerFn({ method: "POST" })
         ? {
             id: (payRes.data as any).id,
             amount: totals.netAmount,
+            collected: paymentSplit(payRes.data as any, totals.netAmount).collected,
             method: (payRes.data as any).method as string,
-            status: (payRes.data as any).status as string,
+            status: paymentDisplayStatus(payRes.data as any) as string,
             paid_at: (payRes.data as any).paid_at as string,
             note: (payRes.data as any).note as string | null,
           }
@@ -1098,7 +1100,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
     let deliveriesQ = supabase
       .from("deliveries")
       .select(
-        "id, status, route_id, driver_id, customer_id, delivery_date, created_at, updated_at, comment, routes(name), customers(name, address, lat, lng), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, method, status, paid_at)",
+        "id, status, route_id, driver_id, customer_id, delivery_date, created_at, updated_at, comment, routes(name), customers(name, address, lat, lng), delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity), payments(id, amount, amount_paid, method, status, paid_at)",
       )
       .eq("delivery_date", today)
       .order("updated_at", { ascending: false });
@@ -1232,7 +1234,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       delivery_id: string | null;
       total: number;
       updated_at: string | null;
-      payment_status: "paid" | "pending" | null;
+      payment_status: "paid" | "pending" | "partial" | null;
     };
 
     const stops: StopRow[] = [];
@@ -1245,13 +1247,13 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       const order = ordersByRouteCustomer.get(`${rc.route_id}:${rc.customer_id}`);
       let status: LiveStopStatus = "unvisited";
       let total = 0;
-      let paymentStatus: "paid" | "pending" | null = null;
+      let paymentStatus: "paid" | "pending" | "partial" | null = null;
       if (del) {
         status = del.status as LiveStopStatus;
         const totals = deliveryNetTotals(del.delivery_items ?? [], del.delivery_returns ?? []);
         total = totals.netAmount;
         const pay = (del.payments ?? []).find((p: any) => p.delivery_id === del.id) ?? del.payments?.[0];
-        paymentStatus = pay?.status ?? null;
+        paymentStatus = pay ? paymentDisplayStatus(pay) : null;
       } else if (order) {
         status = "pending";
         const items = (order as any).customer_order_items ?? [];

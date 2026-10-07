@@ -12,3 +12,11 @@ export function paymentSplit(
   const got = Math.min(Math.max(Number(p.amount_paid ?? 0), 0), amount);
   return { collected: got, pending: Math.round((amount - got) * 100) / 100 };
 }
+
+/** What admin screens show: a pending payment with money already received is "partial". */
+export function paymentDisplayStatus(
+  p: { status?: string | null; amount_paid?: number | string | null },
+): "paid" | "pending" | "partial" {
+  if (p.status === "paid") return "paid";
+  return Number(p.amount_paid ?? 0) > 0 ? "partial" : "pending";
+}
