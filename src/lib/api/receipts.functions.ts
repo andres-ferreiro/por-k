@@ -21,7 +21,7 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
     const { data: del, error } = await supabase
       .from("deliveries")
       .select(
-        "id, status, updated_at, delivery_date, branch_id, customer_id, driver_id, customers(name, phone, pending_balance), branches(name, address, phone)",
+        "id, status, updated_at, delivery_date, branch_id, customer_id, driver_id, customers(name, phone, pending_balance), branches(name, address, phone), routes(route_mode)",
       )
       .eq("id", data.delivery_id)
       .eq("driver_id", userId)
@@ -120,7 +120,9 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
     // Account lines come from the ledger so a reprint always matches what was recorded.
     // Only reliable for today's visit (later movements would distort "before").
     let account: ReceiptData["account"] = null;
-    if (String((del as any).delivery_date) === todayInTZ()) {
+    // Pre-order routes work as credit, not as account debt: their receipt has no account block.
+    const isPreorder = (del as any).routes?.route_mode === "preorder";
+    if (!isPreorder && String((del as any).delivery_date) === todayInTZ()) {
       const { startISO } = tzDayRange(String((del as any).delivery_date));
       // Money received today for the OLD debt = ledger payments not tied to this sale's payment row.
       let debtPaid = 0;
