@@ -9,50 +9,61 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedAppRouteRouteImport } from './routes/_authenticated/app/route'
+import { Route as AuthenticatedDriverRouteRouteImport } from './routes/_authenticated/driver/route'
 import { Route as AuthenticatedPostLoginRouteImport } from './routes/_authenticated/post-login'
 import { Route as AuthenticatedSupplyDriverRouteRouteImport } from './routes/_authenticated/supply-driver/route'
-import { Route as AuthenticatedDriverRouteRouteImport } from './routes/_authenticated/driver/route'
-import { Route as AuthenticatedAppRouteRouteImport } from './routes/_authenticated/app/route'
-import { Route as AuthenticatedSupplyDriverIndexRouteImport } from './routes/_authenticated/supply-driver/index'
-import { Route as AuthenticatedDriverIndexRouteImport } from './routes/_authenticated/driver/index'
 import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app/index'
-import { Route as AuthenticatedSupplyDriverStopsRouteImport } from './routes/_authenticated/supply-driver/stops'
-import { Route as AuthenticatedSupplyDriverHistoryRouteImport } from './routes/_authenticated/supply-driver/history'
-import { Route as AuthenticatedDriverOverviewRouteImport } from './routes/_authenticated/driver/overview'
-import { Route as AuthenticatedDriverExpensesRouteImport } from './routes/_authenticated/driver/expenses'
-import { Route as AuthenticatedAppUsersRouteImport } from './routes/_authenticated/app/users'
-import { Route as AuthenticatedAppRoutesRouteImport } from './routes/_authenticated/app/routes'
-import { Route as AuthenticatedAppReportsRouteImport } from './routes/_authenticated/app/reports'
-import { Route as AuthenticatedAppProductsRouteImport } from './routes/_authenticated/app/products'
-import { Route as AuthenticatedAppPreordersRouteImport } from './routes/_authenticated/app/preorders'
-import { Route as AuthenticatedAppPaymentsRouteImport } from './routes/_authenticated/app/payments'
-import { Route as AuthenticatedAppLiveRouteImport } from './routes/_authenticated/app/live'
-import { Route as AuthenticatedAppExpensesRouteImport } from './routes/_authenticated/app/expenses'
-import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenticated/app/dispatch'
-import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
-import { Route as AuthenticatedAppCustomersRouteImport } from './routes/_authenticated/app/customers'
-import { Route as AuthenticatedAppBranchesRouteImport } from './routes/_authenticated/app/branches'
 import { Route as AuthenticatedAppBodegaRouteImport } from './routes/_authenticated/app/bodega'
+import { Route as AuthenticatedAppBranchesRouteImport } from './routes/_authenticated/app/branches'
+import { Route as AuthenticatedAppCustomersRouteImport } from './routes/_authenticated/app/customers'
+import { Route as AuthenticatedAppDeliveriesRouteImport } from './routes/_authenticated/app/deliveries'
+import { Route as AuthenticatedAppDispatchRouteImport } from './routes/_authenticated/app/dispatch'
+import { Route as AuthenticatedAppExpensesRouteImport } from './routes/_authenticated/app/expenses'
+import { Route as AuthenticatedAppLiveRouteImport } from './routes/_authenticated/app/live'
+import { Route as AuthenticatedAppPaymentsRouteImport } from './routes/_authenticated/app/payments'
+import { Route as AuthenticatedAppPreordersRouteImport } from './routes/_authenticated/app/preorders'
+import { Route as AuthenticatedAppProductsRouteImport } from './routes/_authenticated/app/products'
+import { Route as AuthenticatedAppReportsRouteImport } from './routes/_authenticated/app/reports'
+import { Route as AuthenticatedAppRoutesRouteImport } from './routes/_authenticated/app/routes'
+import { Route as AuthenticatedAppUsersRouteImport } from './routes/_authenticated/app/users'
+import { Route as AuthenticatedDriverIndexRouteImport } from './routes/_authenticated/driver/index'
+import { Route as AuthenticatedDriverExpensesRouteImport } from './routes/_authenticated/driver/expenses'
+import { Route as AuthenticatedDriverOverviewRouteImport } from './routes/_authenticated/driver/overview'
+import { Route as AuthenticatedSupplyDriverIndexRouteImport } from './routes/_authenticated/supply-driver/index'
+import { Route as AuthenticatedSupplyDriverHistoryRouteImport } from './routes/_authenticated/supply-driver/history'
+import { Route as AuthenticatedSupplyDriverStopsRouteImport } from './routes/_authenticated/supply-driver/stops'
 import { Route as AuthenticatedAppRoutesIndexRouteImport } from './routes/_authenticated/app/routes.index'
 import { Route as AuthenticatedAppRoutesRouteIdRouteImport } from './routes/_authenticated/app/routes.$routeId'
 
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAppRouteRoute = AuthenticatedAppRouteRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedDriverRouteRoute =
+  AuthenticatedDriverRouteRouteImport.update({
+    id: '/driver',
+    path: '/driver',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedPostLoginRoute = AuthenticatedPostLoginRouteImport.update({
   id: '/post-login',
   path: '/post-login',
@@ -64,112 +75,20 @@ const AuthenticatedSupplyDriverRouteRoute =
     path: '/supply-driver',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedDriverRouteRoute =
-  AuthenticatedDriverRouteRouteImport.update({
-    id: '/driver',
-    path: '/driver',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedAppRouteRoute = AuthenticatedAppRouteRouteImport.update({
-  id: '/app',
-  path: '/app',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedSupplyDriverIndexRoute =
-  AuthenticatedSupplyDriverIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => AuthenticatedSupplyDriverRouteRoute,
-  } as any)
-const AuthenticatedDriverIndexRoute =
-  AuthenticatedDriverIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => AuthenticatedDriverRouteRoute,
-  } as any)
 const AuthenticatedAppIndexRoute = AuthenticatedAppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthenticatedAppRouteRoute,
 } as any)
-const AuthenticatedSupplyDriverStopsRoute =
-  AuthenticatedSupplyDriverStopsRouteImport.update({
-    id: '/stops',
-    path: '/stops',
-    getParentRoute: () => AuthenticatedSupplyDriverRouteRoute,
-  } as any)
-const AuthenticatedSupplyDriverHistoryRoute =
-  AuthenticatedSupplyDriverHistoryRouteImport.update({
-    id: '/history',
-    path: '/history',
-    getParentRoute: () => AuthenticatedSupplyDriverRouteRoute,
-  } as any)
-const AuthenticatedDriverOverviewRoute =
-  AuthenticatedDriverOverviewRouteImport.update({
-    id: '/overview',
-    path: '/overview',
-    getParentRoute: () => AuthenticatedDriverRouteRoute,
-  } as any)
-const AuthenticatedDriverExpensesRoute =
-  AuthenticatedDriverExpensesRouteImport.update({
-    id: '/expenses',
-    path: '/expenses',
-    getParentRoute: () => AuthenticatedDriverRouteRoute,
-  } as any)
-const AuthenticatedAppUsersRoute = AuthenticatedAppUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
+const AuthenticatedAppBodegaRoute = AuthenticatedAppBodegaRouteImport.update({
+  id: '/bodega',
+  path: '/bodega',
   getParentRoute: () => AuthenticatedAppRouteRoute,
 } as any)
-const AuthenticatedAppRoutesRoute = AuthenticatedAppRoutesRouteImport.update({
-  id: '/routes',
-  path: '/routes',
-  getParentRoute: () => AuthenticatedAppRouteRoute,
-} as any)
-const AuthenticatedAppReportsRoute = AuthenticatedAppReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => AuthenticatedAppRouteRoute,
-} as any)
-const AuthenticatedAppProductsRoute =
-  AuthenticatedAppProductsRouteImport.update({
-    id: '/products',
-    path: '/products',
-    getParentRoute: () => AuthenticatedAppRouteRoute,
-  } as any)
-const AuthenticatedAppPreordersRoute =
-  AuthenticatedAppPreordersRouteImport.update({
-    id: '/preorders',
-    path: '/preorders',
-    getParentRoute: () => AuthenticatedAppRouteRoute,
-  } as any)
-const AuthenticatedAppPaymentsRoute =
-  AuthenticatedAppPaymentsRouteImport.update({
-    id: '/payments',
-    path: '/payments',
-    getParentRoute: () => AuthenticatedAppRouteRoute,
-  } as any)
-const AuthenticatedAppLiveRoute = AuthenticatedAppLiveRouteImport.update({
-  id: '/live',
-  path: '/live',
-  getParentRoute: () => AuthenticatedAppRouteRoute,
-} as any)
-const AuthenticatedAppExpensesRoute =
-  AuthenticatedAppExpensesRouteImport.update({
-    id: '/expenses',
-    path: '/expenses',
-    getParentRoute: () => AuthenticatedAppRouteRoute,
-  } as any)
-const AuthenticatedAppDispatchRoute =
-  AuthenticatedAppDispatchRouteImport.update({
-    id: '/dispatch',
-    path: '/dispatch',
-    getParentRoute: () => AuthenticatedAppRouteRoute,
-  } as any)
-const AuthenticatedAppDeliveriesRoute =
-  AuthenticatedAppDeliveriesRouteImport.update({
-    id: '/deliveries',
-    path: '/deliveries',
+const AuthenticatedAppBranchesRoute =
+  AuthenticatedAppBranchesRouteImport.update({
+    id: '/branches',
+    path: '/branches',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
 const AuthenticatedAppCustomersRoute =
@@ -178,17 +97,98 @@ const AuthenticatedAppCustomersRoute =
     path: '/customers',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
-const AuthenticatedAppBranchesRoute =
-  AuthenticatedAppBranchesRouteImport.update({
-    id: '/branches',
-    path: '/branches',
+const AuthenticatedAppDeliveriesRoute =
+  AuthenticatedAppDeliveriesRouteImport.update({
+    id: '/deliveries',
+    path: '/deliveries',
     getParentRoute: () => AuthenticatedAppRouteRoute,
   } as any)
-const AuthenticatedAppBodegaRoute = AuthenticatedAppBodegaRouteImport.update({
-  id: '/bodega',
-  path: '/bodega',
+const AuthenticatedAppDispatchRoute =
+  AuthenticatedAppDispatchRouteImport.update({
+    id: '/dispatch',
+    path: '/dispatch',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppExpensesRoute =
+  AuthenticatedAppExpensesRouteImport.update({
+    id: '/expenses',
+    path: '/expenses',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppLiveRoute = AuthenticatedAppLiveRouteImport.update({
+  id: '/live',
+  path: '/live',
   getParentRoute: () => AuthenticatedAppRouteRoute,
 } as any)
+const AuthenticatedAppPaymentsRoute =
+  AuthenticatedAppPaymentsRouteImport.update({
+    id: '/payments',
+    path: '/payments',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppPreordersRoute =
+  AuthenticatedAppPreordersRouteImport.update({
+    id: '/preorders',
+    path: '/preorders',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppProductsRoute =
+  AuthenticatedAppProductsRouteImport.update({
+    id: '/products',
+    path: '/products',
+    getParentRoute: () => AuthenticatedAppRouteRoute,
+  } as any)
+const AuthenticatedAppReportsRoute = AuthenticatedAppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedAppRoutesRoute = AuthenticatedAppRoutesRouteImport.update({
+  id: '/routes',
+  path: '/routes',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedAppUsersRoute = AuthenticatedAppUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AuthenticatedAppRouteRoute,
+} as any)
+const AuthenticatedDriverIndexRoute =
+  AuthenticatedDriverIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedDriverExpensesRoute =
+  AuthenticatedDriverExpensesRouteImport.update({
+    id: '/expenses',
+    path: '/expenses',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedDriverOverviewRoute =
+  AuthenticatedDriverOverviewRouteImport.update({
+    id: '/overview',
+    path: '/overview',
+    getParentRoute: () => AuthenticatedDriverRouteRoute,
+  } as any)
+const AuthenticatedSupplyDriverIndexRoute =
+  AuthenticatedSupplyDriverIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedSupplyDriverRouteRoute,
+  } as any)
+const AuthenticatedSupplyDriverHistoryRoute =
+  AuthenticatedSupplyDriverHistoryRouteImport.update({
+    id: '/history',
+    path: '/history',
+    getParentRoute: () => AuthenticatedSupplyDriverRouteRoute,
+  } as any)
+const AuthenticatedSupplyDriverStopsRoute =
+  AuthenticatedSupplyDriverStopsRouteImport.update({
+    id: '/stops',
+    path: '/stops',
+    getParentRoute: () => AuthenticatedSupplyDriverRouteRoute,
+  } as any)
 const AuthenticatedAppRoutesIndexRoute =
   AuthenticatedAppRoutesIndexRouteImport.update({
     id: '/',
@@ -388,11 +388,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -402,12 +402,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/app': {
+      id: '/_authenticated/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AuthenticatedAppRouteRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/driver': {
+      id: '/_authenticated/driver'
+      path: '/driver'
+      fullPath: '/driver'
+      preLoaderRoute: typeof AuthenticatedDriverRouteRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/post-login': {
       id: '/_authenticated/post-login'
@@ -423,34 +437,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSupplyDriverRouteRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/driver': {
-      id: '/_authenticated/driver'
-      path: '/driver'
-      fullPath: '/driver'
-      preLoaderRoute: typeof AuthenticatedDriverRouteRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/app': {
-      id: '/_authenticated/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AuthenticatedAppRouteRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/supply-driver/': {
-      id: '/_authenticated/supply-driver/'
-      path: '/'
-      fullPath: '/supply-driver/'
-      preLoaderRoute: typeof AuthenticatedSupplyDriverIndexRouteImport
-      parentRoute: typeof AuthenticatedSupplyDriverRouteRoute
-    }
-    '/_authenticated/driver/': {
-      id: '/_authenticated/driver/'
-      path: '/'
-      fullPath: '/driver/'
-      preLoaderRoute: typeof AuthenticatedDriverIndexRouteImport
-      parentRoute: typeof AuthenticatedDriverRouteRoute
-    }
     '/_authenticated/app/': {
       id: '/_authenticated/app/'
       path: '/'
@@ -458,109 +444,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppIndexRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
-    '/_authenticated/supply-driver/stops': {
-      id: '/_authenticated/supply-driver/stops'
-      path: '/stops'
-      fullPath: '/supply-driver/stops'
-      preLoaderRoute: typeof AuthenticatedSupplyDriverStopsRouteImport
-      parentRoute: typeof AuthenticatedSupplyDriverRouteRoute
-    }
-    '/_authenticated/supply-driver/history': {
-      id: '/_authenticated/supply-driver/history'
-      path: '/history'
-      fullPath: '/supply-driver/history'
-      preLoaderRoute: typeof AuthenticatedSupplyDriverHistoryRouteImport
-      parentRoute: typeof AuthenticatedSupplyDriverRouteRoute
-    }
-    '/_authenticated/driver/overview': {
-      id: '/_authenticated/driver/overview'
-      path: '/overview'
-      fullPath: '/driver/overview'
-      preLoaderRoute: typeof AuthenticatedDriverOverviewRouteImport
-      parentRoute: typeof AuthenticatedDriverRouteRoute
-    }
-    '/_authenticated/driver/expenses': {
-      id: '/_authenticated/driver/expenses'
-      path: '/expenses'
-      fullPath: '/driver/expenses'
-      preLoaderRoute: typeof AuthenticatedDriverExpensesRouteImport
-      parentRoute: typeof AuthenticatedDriverRouteRoute
-    }
-    '/_authenticated/app/users': {
-      id: '/_authenticated/app/users'
-      path: '/users'
-      fullPath: '/app/users'
-      preLoaderRoute: typeof AuthenticatedAppUsersRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/routes': {
-      id: '/_authenticated/app/routes'
-      path: '/routes'
-      fullPath: '/app/routes'
-      preLoaderRoute: typeof AuthenticatedAppRoutesRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/reports': {
-      id: '/_authenticated/app/reports'
-      path: '/reports'
-      fullPath: '/app/reports'
-      preLoaderRoute: typeof AuthenticatedAppReportsRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/products': {
-      id: '/_authenticated/app/products'
-      path: '/products'
-      fullPath: '/app/products'
-      preLoaderRoute: typeof AuthenticatedAppProductsRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/preorders': {
-      id: '/_authenticated/app/preorders'
-      path: '/preorders'
-      fullPath: '/app/preorders'
-      preLoaderRoute: typeof AuthenticatedAppPreordersRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/payments': {
-      id: '/_authenticated/app/payments'
-      path: '/payments'
-      fullPath: '/app/payments'
-      preLoaderRoute: typeof AuthenticatedAppPaymentsRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/live': {
-      id: '/_authenticated/app/live'
-      path: '/live'
-      fullPath: '/app/live'
-      preLoaderRoute: typeof AuthenticatedAppLiveRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/expenses': {
-      id: '/_authenticated/app/expenses'
-      path: '/expenses'
-      fullPath: '/app/expenses'
-      preLoaderRoute: typeof AuthenticatedAppExpensesRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/dispatch': {
-      id: '/_authenticated/app/dispatch'
-      path: '/dispatch'
-      fullPath: '/app/dispatch'
-      preLoaderRoute: typeof AuthenticatedAppDispatchRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/deliveries': {
-      id: '/_authenticated/app/deliveries'
-      path: '/deliveries'
-      fullPath: '/app/deliveries'
-      preLoaderRoute: typeof AuthenticatedAppDeliveriesRouteImport
-      parentRoute: typeof AuthenticatedAppRouteRoute
-    }
-    '/_authenticated/app/customers': {
-      id: '/_authenticated/app/customers'
-      path: '/customers'
-      fullPath: '/app/customers'
-      preLoaderRoute: typeof AuthenticatedAppCustomersRouteImport
+    '/_authenticated/app/bodega': {
+      id: '/_authenticated/app/bodega'
+      path: '/bodega'
+      fullPath: '/app/bodega'
+      preLoaderRoute: typeof AuthenticatedAppBodegaRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
     '/_authenticated/app/branches': {
@@ -570,12 +458,124 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppBranchesRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
     }
-    '/_authenticated/app/bodega': {
-      id: '/_authenticated/app/bodega'
-      path: '/bodega'
-      fullPath: '/app/bodega'
-      preLoaderRoute: typeof AuthenticatedAppBodegaRouteImport
+    '/_authenticated/app/customers': {
+      id: '/_authenticated/app/customers'
+      path: '/customers'
+      fullPath: '/app/customers'
+      preLoaderRoute: typeof AuthenticatedAppCustomersRouteImport
       parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/deliveries': {
+      id: '/_authenticated/app/deliveries'
+      path: '/deliveries'
+      fullPath: '/app/deliveries'
+      preLoaderRoute: typeof AuthenticatedAppDeliveriesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/dispatch': {
+      id: '/_authenticated/app/dispatch'
+      path: '/dispatch'
+      fullPath: '/app/dispatch'
+      preLoaderRoute: typeof AuthenticatedAppDispatchRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/expenses': {
+      id: '/_authenticated/app/expenses'
+      path: '/expenses'
+      fullPath: '/app/expenses'
+      preLoaderRoute: typeof AuthenticatedAppExpensesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/live': {
+      id: '/_authenticated/app/live'
+      path: '/live'
+      fullPath: '/app/live'
+      preLoaderRoute: typeof AuthenticatedAppLiveRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/payments': {
+      id: '/_authenticated/app/payments'
+      path: '/payments'
+      fullPath: '/app/payments'
+      preLoaderRoute: typeof AuthenticatedAppPaymentsRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/preorders': {
+      id: '/_authenticated/app/preorders'
+      path: '/preorders'
+      fullPath: '/app/preorders'
+      preLoaderRoute: typeof AuthenticatedAppPreordersRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/products': {
+      id: '/_authenticated/app/products'
+      path: '/products'
+      fullPath: '/app/products'
+      preLoaderRoute: typeof AuthenticatedAppProductsRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/reports': {
+      id: '/_authenticated/app/reports'
+      path: '/reports'
+      fullPath: '/app/reports'
+      preLoaderRoute: typeof AuthenticatedAppReportsRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/routes': {
+      id: '/_authenticated/app/routes'
+      path: '/routes'
+      fullPath: '/app/routes'
+      preLoaderRoute: typeof AuthenticatedAppRoutesRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/app/users': {
+      id: '/_authenticated/app/users'
+      path: '/users'
+      fullPath: '/app/users'
+      preLoaderRoute: typeof AuthenticatedAppUsersRouteImport
+      parentRoute: typeof AuthenticatedAppRouteRoute
+    }
+    '/_authenticated/driver/': {
+      id: '/_authenticated/driver/'
+      path: '/'
+      fullPath: '/driver/'
+      preLoaderRoute: typeof AuthenticatedDriverIndexRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/driver/expenses': {
+      id: '/_authenticated/driver/expenses'
+      path: '/expenses'
+      fullPath: '/driver/expenses'
+      preLoaderRoute: typeof AuthenticatedDriverExpensesRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/driver/overview': {
+      id: '/_authenticated/driver/overview'
+      path: '/overview'
+      fullPath: '/driver/overview'
+      preLoaderRoute: typeof AuthenticatedDriverOverviewRouteImport
+      parentRoute: typeof AuthenticatedDriverRouteRoute
+    }
+    '/_authenticated/supply-driver/': {
+      id: '/_authenticated/supply-driver/'
+      path: '/'
+      fullPath: '/supply-driver/'
+      preLoaderRoute: typeof AuthenticatedSupplyDriverIndexRouteImport
+      parentRoute: typeof AuthenticatedSupplyDriverRouteRoute
+    }
+    '/_authenticated/supply-driver/history': {
+      id: '/_authenticated/supply-driver/history'
+      path: '/history'
+      fullPath: '/supply-driver/history'
+      preLoaderRoute: typeof AuthenticatedSupplyDriverHistoryRouteImport
+      parentRoute: typeof AuthenticatedSupplyDriverRouteRoute
+    }
+    '/_authenticated/supply-driver/stops': {
+      id: '/_authenticated/supply-driver/stops'
+      path: '/stops'
+      fullPath: '/supply-driver/stops'
+      preLoaderRoute: typeof AuthenticatedSupplyDriverStopsRouteImport
+      parentRoute: typeof AuthenticatedSupplyDriverRouteRoute
     }
     '/_authenticated/app/routes/': {
       id: '/_authenticated/app/routes/'

@@ -26,17 +26,10 @@ export type ReceiptData = {
   grossAmount: number;
   returnAmount: number;
   total: number;
-  payment: {
-    method: ReceiptPaymentMethod;
-    status: "paid" | "pending";
-    /** Cash received for this sale (may exceed the total: the excess paid older debt). */
-    amountPaid: number;
-  } | null;
-  /** What the customer owes right now (read when the receipt is loaded). */
-  currentBalance?: number;
+  payment: { method: ReceiptPaymentMethod; status: "paid" | "pending" } | null;
   /**
-   * Exact figures of the visit that was just saved. Only known right after saving
-   * (added on the client, not stored), so a reprint falls back to `currentBalance`.
+   * Customer balance owed before this visit. `settled` means the driver collected it
+   * during this same visit. Added on the client, not stored.
    */
-  account?: { previousBalance: number; received: number; balance: number } | null;
+  previousBalance?: { amount: number; settled: boolean } | null;
 };

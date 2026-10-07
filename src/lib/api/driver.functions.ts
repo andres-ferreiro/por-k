@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { todayInTZ, tzDayRange } from "@/lib/tz";
-import { deliveryNetTotals, deliveryPaymentAmount } from "@/lib/delivery-totals";
+import { deliveryNetTotals } from "@/lib/delivery-totals";
 import { assertSaleWithinStock, fetchDriverDayStock } from "@/lib/driver-stock";
 import { resolveDriverActiveRoute } from "@/lib/driver-route";
 import { round2 } from "@/lib/account";
@@ -834,7 +834,7 @@ export const listTodayPayments = createServerFn({ method: "POST" })
     const { data: rows, error } = await supabase
       .from("payments")
       .select(
-        "id, amount, amount_paid, is_abono, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
+        "id, amount, amount_paid, is_abono, status, method, note, paid_at, customer_id, delivery_id, customers(name)",
       )
       .eq("driver_id", userId)
       .gte("paid_at", startISO)
@@ -842,16 +842,10 @@ export const listTodayPayments = createServerFn({ method: "POST" })
       .order("paid_at", { ascending: false });
     if (error) throw new Error(error.message);
     return (rows ?? []).map((r: any) => {
-      const items = (r.deliveries?.delivery_items ?? []) as Array<{
-        product_id: string;
-        quantity: number;
-        unit_price: number;
-        line_total?: number;
-      }>;
-      const returns = (r.deliveries?.delivery_returns ?? []) as Array<{ product_id: string; quantity: number }>;
       return {
         id: r.id as string,
-        amount: deliveryPaymentAmount(Number(r.amount), items, returns),
+        // The amount saved with the payment is already net of returns.
+        amount: Number(r.amount),
         /** Cash actually received (partial payments, over-payments and abonos included). */
         amount_paid: Number(r.amount_paid ?? 0),
         is_abono: Boolean(r.is_abono),

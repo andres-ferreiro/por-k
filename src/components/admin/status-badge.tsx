@@ -41,11 +41,15 @@ export function ActiveStatusBadge({
 export function PaymentStatusBadge({
   status,
   amountPaid,
+  isAbono,
 }: {
   status: "paid" | "pending" | string;
   /** When given, a pending payment with something received is shown as "Parcial". */
   amountPaid?: number;
+  /** Money received on account (not a sale): shown as "Abono", not "Pagado". */
+  isAbono?: boolean;
 }) {
+  if (isAbono) return <StatusBadge tone="info">Abono</StatusBadge>;
   if (status !== "paid" && amountPaid !== undefined) {
     return amountPaid > 0 ? (
       <StatusBadge tone="warning">Parcial</StatusBadge>

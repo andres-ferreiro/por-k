@@ -729,32 +729,45 @@ export const listPaymentsAdmin = createServerFn({ method: "POST" })
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
 
-    const deliveryIds = Array.from(
-      new Set((rows ?? []).map((r: any) => r.delivery_id).filter(Boolean)),
-    ) as string[];
-    const deliveryNetById = new Map<string, number>();
-    if (deliveryIds.length > 0) {
-      const { data: dels, error: dErr } = await context.supabase
-        .from("deliveries")
-        .select("id, delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity)")
-        .in("id", deliveryIds);
-      if (dErr) throw new Error(dErr.message);
-      for (const d of dels ?? []) {
-        const totals = deliveryNetTotals(
-          (d as any).delivery_items ?? [],
-          (d as any).delivery_returns ?? [],
-        );
-        deliveryNetById.set(d.id as string, totals.netAmount);
+    const names = await fetchProfileNames((rows ?? []).map((r: any) => r.driver_id));
+
+    // For abonos: what the customer still owed right after that abono. Read from the ledger
+    // with the same ordering as the customer statement, so both screens always agree.
+    const balanceAfterByPayment = new Map<string, number>();
+    const abonoCustomerIds = Array.from(
+      new Set((rows ?? []).filter((r: any) => r.is_abono && r.customer_id).map((r: any) => r.customer_id as string)),
+    );
+    for (let i = 0; i < abonoCustomerIds.length; i += 80) {
+      const group = abonoCustomerIds.slice(i, i + 80);
+      const movements: Array<{ customer_id: string; payment_id: string | null; amount: number }> = [];
+      for (let page = 0; page < 20; page++) {
+        const { data: mv, error: mErr } = await context.supabase
+          .from("customer_account_movements")
+          .select("customer_id, payment_id, amount")
+          .in("customer_id", group)
+          .order("customer_id", { ascending: true })
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(page * 1000, page * 1000 + 999);
+        if (mErr) throw new Error(mErr.message);
+        movements.push(...((mv ?? []) as typeof movements));
+        if ((mv ?? []).length < 1000) break;
+      }
+      const running = new Map<string, number>();
+      for (const m of movements) {
+        const next = Math.round(((running.get(m.customer_id) ?? 0) + Number(m.amount)) * 100) / 100;
+        running.set(m.customer_id, next);
+        if (m.payment_id) balanceAfterByPayment.set(m.payment_id, next);
       }
     }
 
-    const names = await fetchProfileNames((rows ?? []).map((r: any) => r.driver_id));
-
     return (rows ?? []).map((r: any) => ({
       id: r.id as string,
-      amount: r.delivery_id
-        ? deliveryNetById.get(r.delivery_id as string) ?? Number(r.amount)
-        : Number(r.amount),
+      /** Customer's balance right after this abono (abonos only). */
+      balance_after: r.is_abono ? balanceAfterByPayment.get(r.id as string) ?? null : null,
+      // What was charged is the amount saved with the payment (always net of returns). Recomputing
+      // it from the delivery undervalues returns of products that were not sold that day.
+      amount: Number(r.amount),
       /** Cash actually received (partial payments, extra paid on old debt and abonos included). */
       amount_paid: Number(r.amount_paid ?? 0),
       is_abono: Boolean(r.is_abono),

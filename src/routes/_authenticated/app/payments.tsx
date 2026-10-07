@@ -142,8 +142,9 @@ function DailyPayments() {
         monto: r.amount,
         recibido: r.amount_paid,
         debe: r.is_abono ? 0 : Math.max(0, r.amount - r.amount_paid),
+        saldo_despues_abono: r.is_abono ? (r.balance_after ?? "") : "",
         metodo: methodLabel[r.method] ?? r.method,
-        estado: r.status === "paid" ? "Pagado" : r.amount_paid > 0 ? "Parcial" : "Pendiente",
+        estado: r.is_abono ? "Abono" : r.status === "paid" ? "Pagado" : r.amount_paid > 0 ? "Parcial" : "Pendiente",
         origen: r.from_delivery ? "Venta entrega" : "Abono manual",
         nota: r.note ?? "",
       })),
@@ -262,7 +263,7 @@ function DailyPayments() {
                 <TableCell>{r.route_name ?? "—"}</TableCell>
                 <TableCell>{r.driver_name ?? "—"}</TableCell>
                 <TableCell>{methodLabel[r.method] ?? r.method}</TableCell>
-                <TableCell><PaymentStatusBadge status={r.status} amountPaid={r.amount_paid} /></TableCell>
+                <TableCell><PaymentStatusBadge status={r.status} amountPaid={r.amount_paid} isAbono={r.is_abono} /></TableCell>
                 <TableCell>
                   <StatusBadge tone={r.from_delivery ? "info" : "neutral"}>
                     {r.from_delivery ? "Venta entrega" : "Abono manual"}
@@ -271,9 +272,24 @@ function DailyPayments() {
                 <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.amount)}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmtMoney(r.amount_paid)}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {!r.is_abono && r.amount - r.amount_paid > 0.004
-                    ? <span className="font-medium text-rose-600">{fmtMoney(r.amount - r.amount_paid)}</span>
-                    : <span className="text-muted-foreground">—</span>}
+                  {r.is_abono ? (
+                    // An abono has no "own" debt; show what the customer still owes after it.
+                    r.balance_after == null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : r.balance_after > 0.004 ? (
+                      <span className="font-medium text-rose-600" title="Saldo del cliente después de este abono">
+                        Saldo {fmtMoney(r.balance_after)}
+                      </span>
+                    ) : (
+                      <span className="font-medium text-emerald-600" title="Saldo del cliente después de este abono">
+                        Saldado
+                      </span>
+                    )
+                  ) : r.amount - r.amount_paid > 0.004 ? (
+                    <span className="font-medium text-rose-600">{fmtMoney(r.amount - r.amount_paid)}</span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

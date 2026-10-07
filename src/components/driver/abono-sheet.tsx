@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { registerCustomerPayment } from "@/lib/api/accounts.functions";
 import { parseMoneyInput, round2 } from "@/lib/account";
-import type { MoneyMethod } from "@/components/driver/received-field";
+type MoneyMethod = "cash" | "transfer" | "other";
 
 interface Props {
   open: boolean;
