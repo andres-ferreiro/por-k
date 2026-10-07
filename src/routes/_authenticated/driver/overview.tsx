@@ -148,11 +148,17 @@ function Page() {
   const totalExpenses = exps.reduce((s, e) => s + e.amount, 0);
   const saldoALiquidar = totalSold - totalExpenses;  // totalSold is already net-of-returns
 
-  const totalPaid = pays.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0);
+  // Cash received = sum of amount_paid: covers partial payments, extra paid on old debt and abonos.
+  const totalPaid = pays.reduce((s, p) => s + p.amount_paid, 0);
+  const totalAbonos = pays.filter((p) => p.is_abono).reduce((s, p) => s + p.amount_paid, 0);
+  // Sold but not collected (on credit or the unpaid part of a partial payment).
+  const totalFiado = pays
+    .filter((p) => !p.is_abono)
+    .reduce((s, p) => s + Math.max(0, p.amount - p.amount_paid), 0);
 
   const byMethod: Record<string, number> = {};
   for (const p of pays) {
-    if (p.status === "paid") byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount;
+    if (p.amount_paid > 0) byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount_paid;
   }
 
   const canEdit = (customerId: string) => !!route?.customers.find((c) => c.id === customerId);
@@ -204,6 +210,29 @@ function Page() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Cash to hand over */}
+      <Card>
+        <CardContent className="py-4">
+          <div className="grid grid-cols-3 divide-x text-center">
+            <div className="px-1">
+              <div className="text-xs text-muted-foreground mb-0.5">Cobrado</div>
+              <div className="text-lg font-bold tabular-nums text-emerald-600">{fmtMoney(totalPaid)}</div>
+            </div>
+            <div className="px-1">
+              <div className="text-xs text-muted-foreground mb-0.5">Fiado</div>
+              <div className={cn("text-lg font-bold tabular-nums", totalFiado > 0 ? "text-amber-600" : "")}>{fmtMoney(totalFiado)}</div>
+            </div>
+            <div className="px-1">
+              <div className="text-xs text-muted-foreground mb-0.5">Abonos</div>
+              <div className="text-lg font-bold tabular-nums">{fmtMoney(totalAbonos)}</div>
+            </div>
+          </div>
+          <p className="mt-2 text-center text-[10px] text-muted-foreground">
+            Cobrado incluye abonos · Fiado = vendido sin cobrar
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Progress ring */}
       <Card>
@@ -274,7 +303,7 @@ function Page() {
           <div className="space-y-2">
             {rows.map((r) => {
               const meta = STATUS_META[r.status] ?? STATUS_META.pending;
-              const pay = pays.find((p) => p.customer_id === r.customer_id);
+              const pay = pays.find((p) => p.delivery_id === r.id);
               const editable = canEdit(r.customer_id);
               return (
                 <Card
@@ -301,7 +330,12 @@ function Page() {
                           <span className="flex items-center gap-1">
                             <Icon icon={METHOD_ICON[pay.method] ?? BanknoteIcon} className="h-3 w-3" />
                             {METHOD_LABEL[pay.method] ?? pay.method}
-                            {pay.status === "pending" && (
+                            {pay.status === "pending" && pay.amount_paid > 0 && (
+                              <span className="ml-1 text-amber-600 font-medium tabular-nums">
+                                · Parcial · Recibido {fmtMoney(pay.amount_paid)} · Debe {fmtMoney(Math.max(0, pay.amount - pay.amount_paid))}
+                              </span>
+                            )}
+                            {pay.status === "pending" && pay.amount_paid <= 0 && (
                               <span className="ml-1 text-amber-600 font-medium">· Pendiente</span>
                             )}
                           </span>

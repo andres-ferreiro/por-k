@@ -203,18 +203,31 @@ function layoutReceipt(p: Painter, data: ReceiptData, logo: HTMLImageElement | n
   p.gap(4);
 
   if (data.payment) {
-    const pending = data.payment.status === "pending" || data.payment.method === "credit";
-    p.row("Forma de pago", METHOD_LABEL[data.payment.method] ?? data.payment.method, { size: 21 });
-    p.row("Estado", pending ? "PENDIENTE DE PAGO" : "PAGADO", { size: 21, bold: true });
+    const received = data.payment.amountPaid;
+    // Same rule the database uses: paid once what was received covers the sale.
+    const state = received >= data.total - 0.004 ? "PAGADO" : received > 0 ? "PAGO PARCIAL" : "PENDIENTE DE PAGO";
+    if (received > 0) {
+      p.row("Forma de pago", METHOD_LABEL[data.payment.method] ?? data.payment.method, { size: 21 });
+      p.row("Recibido", money(received), { size: 22, bold: true });
+    }
+    p.row("Estado", state, { size: 21, bold: true });
   }
 
-  if (data.previousBalance && data.previousBalance.amount > 0) {
+  if (data.account) {
+    // Exact figures of the visit that was just saved.
     p.gap(2);
+    if (data.account.previousBalance > 0) {
+      p.row("Saldo anterior", money(data.account.previousBalance), { size: 21 });
+    }
     p.row(
-      data.previousBalance.settled ? "Saldo anterior cobrado" : "Saldo anterior pendiente",
-      money(data.previousBalance.amount),
-      { size: 21, bold: !data.previousBalance.settled },
+      data.account.balance > 0 ? "SALDO PENDIENTE" : "Saldo",
+      data.account.balance > 0 ? money(data.account.balance) : "LIQUIDADO",
+      { size: 23, bold: true },
     );
+  } else if (data.currentBalance && data.currentBalance > 0) {
+    // Reprint: only the balance as of now is known.
+    p.gap(2);
+    p.row("Saldo actual del cliente", money(data.currentBalance), { size: 21, bold: true });
   }
 
   p.rule();

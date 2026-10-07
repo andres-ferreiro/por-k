@@ -98,7 +98,7 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
 
     let pq = supabase
       .from("payments")
-      .select("id, amount, method, status, driver_id, delivery_id")
+      .select("id, amount, amount_paid, is_abono, method, status, driver_id, delivery_id")
       .gte("paid_at", startISO)
       .lt("paid_at", endISO);
     if (bid) pq = pq.eq("branch_id", bid);
@@ -153,13 +153,16 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
         ? deliveryNetById.get(p.delivery_id)!
         : Number(p.amount ?? 0);
 
-    const paid = payments.filter((p: any) => p.status === "paid");
-    const collectedTotal = paid.reduce((a: number, p: any) => a + paymentAmount(p), 0);
+    // Cash received = amount_paid (partial payments, extra paid on old debt and abonos included).
+    // "Pending" = what was sold in the period and not collected yet.
+    const receivedOf = (p: any) => Number(p.amount_paid ?? 0);
+    const unpaidOf = (p: any) => (p.is_abono ? 0 : Math.max(0, paymentAmount(p) - receivedOf(p)));
+    const collectedTotal = payments.reduce((a: number, p: any) => a + receivedOf(p), 0);
     const byMethod: Record<string, number> = { cash: 0, transfer: 0, credit: 0, other: 0 };
-    for (const p of paid) byMethod[p.method] = (byMethod[p.method] ?? 0) + paymentAmount(p);
-    const pendingAmount = payments
-      .filter((p: any) => p.status === "pending")
-      .reduce((a: number, p: any) => a + paymentAmount(p), 0);
+    for (const p of payments) {
+      if (receivedOf(p) > 0) byMethod[p.method] = (byMethod[p.method] ?? 0) + receivedOf(p);
+    }
+    const pendingAmount = payments.reduce((a: number, p: any) => a + unpaidOf(p), 0);
 
     const expenseTotal = expenses.reduce((a: number, e: any) => a + Number(e.amount ?? 0), 0);
     const cashNet = (byMethod.cash ?? 0) - expenseTotal;
@@ -190,9 +193,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     }
     for (const p of payments) {
       const v = ensure((p as any).driver_id);
-      const amt = paymentAmount(p);
-      if (p.status === "paid") v.collected += amt;
-      else v.pending += amt;
+      v.collected += receivedOf(p);
+      v.pending += unpaidOf(p);
     }
 
     return {
@@ -239,10 +241,9 @@ export const getDailyTotals = createServerFn({ method: "POST" })
 
     let payQ = supabase
       .from("payments")
-      .select("paid_at, amount")
+      .select("paid_at, amount_paid")
       .gte("paid_at", startISO)
-      .lt("paid_at", endISO)
-      .eq("status", "paid");
+      .lt("paid_at", endISO);
     if (bid) payQ = payQ.eq("branch_id", bid);
 
     const [delRes, payRes] = await Promise.all([delQ, payQ]);
@@ -286,7 +287,7 @@ export const getDailyTotals = createServerFn({ method: "POST" })
       const day = dayBoundaries.find((b) => paidAt >= b.startISO && paidAt < b.endISO);
       if (!day) continue;
       const entry = spine.get(day.date)!;
-      entry.collected += Number((row as any).amount ?? 0);
+      entry.collected += Number((row as any).amount_paid ?? 0);
     }
 
     return Array.from(spine.values());
@@ -419,7 +420,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
 
     let payQ = supabase
       .from("payments")
-      .select("paid_at, amount, status, method")
+      .select("paid_at, amount_paid, status, method")
       .gte("paid_at", startISO)
       .lt("paid_at", endISO);
     if (bid) payQ = payQ.eq("branch_id", bid);
@@ -427,7 +428,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
 
     let pendQ = supabase
       .from("payments")
-      .select("created_at, amount, method")
+      .select("created_at, amount, amount_paid, method")
       .gte("created_at", startISO)
       .lt("created_at", endISO)
       .eq("status", "pending");
@@ -489,7 +490,8 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
 
     for (const row of payRes.data ?? []) {
       const r = row as any;
-      if (r.status !== "paid") continue;
+      const amt = Number(r.amount_paid ?? 0);
+      if (amt <= 0) continue;
       const iso = r.paid_at as string;
       const key =
         granularity === "hour"
@@ -499,10 +501,8 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
             : dateStrInTZ(iso).slice(0, 7);
       const entry = spine.get(key);
       if (!entry) continue;
-      const amt = Number(r.amount ?? 0);
       entry.collected += amt;
       if (r.method === "cash") addCash(key, amt);
-      if (r.method === "credit") entry.pendingCredit += amt;
     }
 
     for (const row of pendRes.data ?? []) {
@@ -516,7 +516,7 @@ export const getDashboardTrend = createServerFn({ method: "POST" })
             : dateStrInTZ(iso).slice(0, 7);
       const entry = spine.get(key);
       if (!entry) continue;
-      entry.pendingCredit += Number(r.amount ?? 0);
+      entry.pendingCredit += Math.max(0, Number(r.amount ?? 0) - Number(r.amount_paid ?? 0));
     }
 
     for (const row of expRes.data ?? []) {
@@ -712,7 +712,7 @@ export const listPaymentsAdmin = createServerFn({ method: "POST" })
     let q = context.supabase
       .from("payments")
       .select(
-        "id, amount, method, status, paid_at, note, route_id, customer_id, driver_id, delivery_id, routes(name), customers(name)",
+        "id, amount, amount_paid, is_abono, method, status, paid_at, note, route_id, customer_id, driver_id, delivery_id, routes(name), customers(name)",
       )
       .gte("paid_at", startISO)
       .lt("paid_at", endISO)
@@ -755,6 +755,9 @@ export const listPaymentsAdmin = createServerFn({ method: "POST" })
       amount: r.delivery_id
         ? deliveryNetById.get(r.delivery_id as string) ?? Number(r.amount)
         : Number(r.amount),
+      /** Cash actually received (partial payments, extra paid on old debt and abonos included). */
+      amount_paid: Number(r.amount_paid ?? 0),
+      is_abono: Boolean(r.is_abono),
       method: r.method as string,
       status: r.status as "paid" | "pending",
       paid_at: r.paid_at as string,
@@ -891,7 +894,7 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
 
     let payQ = context.supabase
       .from("payments")
-      .select("driver_id, amount, status, delivery_id")
+      .select("driver_id, amount, amount_paid, is_abono, status, delivery_id")
       .gte("paid_at", startISO)
       .lt("paid_at", endISO);
     if (bid) payQ = payQ.eq("branch_id", bid);
@@ -946,8 +949,9 @@ export const reportSalesByDriver = createServerFn({ method: "POST" })
         (p as any).delivery_id && deliveryNetById.has((p as any).delivery_id)
           ? deliveryNetById.get((p as any).delivery_id)!
           : Number((p as any).amount ?? 0);
-      if ((p as any).status === "paid") r.collected += amt;
-      else r.pending += amt;
+      const received = Number((p as any).amount_paid ?? 0);
+      r.collected += received;
+      if (!(p as any).is_abono) r.pending += Math.max(0, amt - received);
     }
     for (const e of expsRes.data ?? []) {
       const r = get((e as any).driver_id);
@@ -1098,7 +1102,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
 
     let paymentsQ = supabase
       .from("payments")
-      .select("id, amount, method, status, paid_at, note, route_id, customer_id, driver_id, delivery_id, routes(name), customers(name)")
+      .select("id, amount, amount_paid, method, status, paid_at, note, route_id, customer_id, driver_id, delivery_id, routes(name), customers(name)")
       .gte("paid_at", startISO)
       .lt("paid_at", endISO)
       .order("paid_at", { ascending: false })
@@ -1324,6 +1328,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
       amount: p.delivery_id
         ? deliveryNetById.get(p.delivery_id as string) ?? Number(p.amount)
         : Number(p.amount),
+      amount_paid: Number(p.amount_paid ?? 0),
       method: p.method as string,
       status: p.status as "paid" | "pending",
       paid_at: p.paid_at as string,
@@ -1373,7 +1378,12 @@ export const getLiveOperations = createServerFn({ method: "POST" })
         id: `pay-${(p as any).id}`,
         type: "payment",
         at: (p as any).paid_at as string,
-        title: (p as any).status === "paid" ? "Pago registrado" : "Pago pendiente",
+        title:
+          (p as any).status === "paid"
+            ? "Pago registrado"
+            : Number((p as any).amount_paid ?? 0) > 0
+              ? "Pago parcial"
+              : "Pago pendiente",
         subtitle: `${(p as any).customers?.name ?? "Cliente"} · ${(p as any).routes?.name ?? "Ruta"}`,
         amount: (p as any).delivery_id
           ? deliveryNetById.get((p as any).delivery_id as string) ?? Number((p as any).amount)
@@ -1409,9 +1419,7 @@ export const getLiveOperations = createServerFn({ method: "POST" })
 
     activity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
-    const paidTotal = recentPayments
-      .filter((p) => p.status === "paid")
-      .reduce((a, p) => a + p.amount, 0);
+    const paidTotal = recentPayments.reduce((a, p) => a + p.amount_paid, 0);
     const expenseTotal = recentExpenses.reduce((a, e) => a + e.amount, 0);
 
     const routesWithThroughput = routeSummaries.filter((r) => r.stops_per_hour != null);

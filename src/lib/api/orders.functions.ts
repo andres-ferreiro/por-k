@@ -102,7 +102,9 @@ async function syncPaymentForDeliveredPreorder(
     .eq("delivery_id", deliveryId)
     .maybeSingle();
   if (existingPay) {
-    const { error } = await supabase.from("payments").update(payRow).eq("id", existingPay.id);
+    // Only the amount can change here. Sending status / method again would reset what the
+    // customer already paid (the database derives paid / partial from amount_paid).
+    const { error } = await supabase.from("payments").update({ amount: payRow.amount }).eq("id", existingPay.id);
     if (error) throw new Error(error.message);
   } else {
     const { error } = await supabase.from("payments").insert(payRow);

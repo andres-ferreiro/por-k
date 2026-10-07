@@ -262,6 +262,63 @@ export type Database = {
           },
         ]
       }
+      customer_account_movements: {
+        Row: {
+          amount: number
+          branch_id: string
+          created_at: string
+          created_by: string | null
+          customer_id: string
+          id: string
+          kind: string
+          method: Database["public"]["Enums"]["payment_method"] | null
+          note: string | null
+          occurred_on: string
+          payment_id: string | null
+        }
+        Insert: {
+          amount: number
+          branch_id: string
+          created_at?: string
+          created_by?: string | null
+          customer_id: string
+          id?: string
+          kind: string
+          method?: Database["public"]["Enums"]["payment_method"] | null
+          note?: string | null
+          occurred_on?: string
+          payment_id?: string | null
+        }
+        Update: {
+          amount?: number
+          branch_id?: string
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string
+          id?: string
+          kind?: string
+          method?: Database["public"]["Enums"]["payment_method"] | null
+          note?: string | null
+          occurred_on?: string
+          payment_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_account_movements_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_account_movements_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_import_batches: {
         Row: {
           branch_id: string
@@ -934,6 +991,7 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          amount_paid: number
           branch_id: string
           carried_over: boolean
           created_at: string
@@ -941,6 +999,7 @@ export type Database = {
           delivery_id: string | null
           driver_id: string
           id: string
+          is_abono: boolean
           method: Database["public"]["Enums"]["payment_method"]
           note: string | null
           paid_at: string
@@ -950,6 +1009,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          amount_paid?: number
           branch_id: string
           carried_over?: boolean
           created_at?: string
@@ -957,6 +1017,7 @@ export type Database = {
           delivery_id?: string | null
           driver_id: string
           id?: string
+          is_abono?: boolean
           method?: Database["public"]["Enums"]["payment_method"]
           note?: string | null
           paid_at?: string
@@ -966,6 +1027,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          amount_paid?: number
           branch_id?: string
           carried_over?: boolean
           created_at?: string
@@ -973,6 +1035,7 @@ export type Database = {
           delivery_id?: string | null
           driver_id?: string
           id?: string
+          is_abono?: boolean
           method?: Database["public"]["Enums"]["payment_method"]
           note?: string | null
           paid_at?: string
@@ -1278,7 +1341,32 @@ export type Database = {
         Args: { p_branch_id: string; p_date: string }
         Returns: undefined
       }
+      account_reconciliation: {
+        Args: never
+        Returns: {
+          cached: number
+          customer_id: string
+          customer_name: string
+          ledger: number
+        }[]
+      }
+      adjust_customer_balance: {
+        Args: { p_amount: number; p_customer_id: string; p_note: string }
+        Returns: number
+      }
       current_branch_id: { Args: never; Returns: string }
+      register_customer_payment: {
+        Args: {
+          p_amount: number
+          p_customer_id: string
+          p_method: Database["public"]["Enums"]["payment_method"]
+          p_note?: string
+        }
+        Returns: {
+          new_balance: number
+          payment_id: string
+        }[]
+      }
       settle_customer_balance: {
         Args: {
           p_customer_id: string

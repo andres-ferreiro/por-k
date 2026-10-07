@@ -3,8 +3,8 @@ import { ReceiptSheet } from "@/components/driver/receipt-sheet";
 
 export interface ShowReceiptArgs {
   deliveryId: string;
-  /** Balance the customer owed before this visit (only known right after saving). */
-  previousBalance?: { amount: number; settled: boolean } | null;
+  /** Exact figures of the visit just saved (only known right after saving). */
+  account?: { previousBalance: number; received: number; balance: number } | null;
 }
 
 interface ReceiptContextValue {

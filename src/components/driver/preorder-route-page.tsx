@@ -9,6 +9,7 @@ import {
   CallIcon,
   Cancel01Icon,
   Search01Icon,
+  Wallet01Icon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
@@ -20,6 +21,7 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PreorderDeliverySheet } from "@/components/driver/preorder-delivery-sheet";
+import { AbonoSheet } from "@/components/driver/abono-sheet";
 import { DriverLoadDialog } from "@/components/driver/driver-load-dialog";
 import { getMyPreorderOrdersForReport } from "@/lib/api/driver.functions";
 
@@ -42,6 +44,7 @@ type RouteData = {
     lat: number | null;
     lng: number | null;
     category: string;
+    pending_balance?: number;
     order: { id: string; status: string; total: number; item_count: number } | null;
     delivery: { id: string; status: "pending" | "delivered" | "failed" } | null;
   }>;
@@ -59,6 +62,7 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
   const [deliveryFor, setDeliveryFor] = useState<RouteData["customers"][number] | null>(null);
   const [search, setSearch] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
+  const [abonoFor, setAbonoFor] = useState<RouteData["customers"][number] | null>(null);
 
   const getOrdersFn = useServerFn(getMyPreorderOrdersForReport);
   const ordersQ = useQuery({
@@ -154,10 +158,17 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
                           {CATEGORY_LABELS[c.category] ?? c.category}
                         </StatusBadge>
                       </div>
-                      <StatusBadge tone={meta.tone} className="shrink-0 normal-case tracking-normal">
-                        <Icon icon={meta.icon} className="h-3 w-3 mr-1" />
-                        {meta.label}
-                      </StatusBadge>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <StatusBadge tone={meta.tone} className="normal-case tracking-normal">
+                          <Icon icon={meta.icon} className="h-3 w-3 mr-1" />
+                          {meta.label}
+                        </StatusBadge>
+                        {(c.pending_balance ?? 0) > 0 && (
+                          <StatusBadge tone="danger" className="text-[10px] px-1.5 normal-case tracking-normal tabular-nums">
+                            Debe {fmt(c.pending_balance ?? 0)}
+                          </StatusBadge>
+                        )}
+                      </div>
                     </div>
                     {c.address && <div className="text-sm text-muted-foreground mt-1 line-clamp-1">{c.address}</div>}
                     {c.order && (
@@ -184,6 +195,11 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
                       </a>
                     </Button>
                   )}
+                  {(c.pending_balance ?? 0) > 0 && (
+                    <Button variant="outline" size="sm" className="flex-1 min-w-[120px]" onClick={() => setAbonoFor(c)}>
+                      <Icon icon={Wallet01Icon} className="h-4 w-4" /> Abono
+                    </Button>
+                  )}
                 </div>
 
                 <Button
@@ -205,6 +221,12 @@ export function PreorderRoutePage({ data }: { data: RouteData }) {
         open={!!deliveryFor}
         onOpenChange={(o) => !o && setDeliveryFor(null)}
         customer={deliveryFor ? { id: deliveryFor.id, name: deliveryFor.name } : null}
+      />
+
+      <AbonoSheet
+        open={!!abonoFor}
+        onOpenChange={(o) => !o && setAbonoFor(null)}
+        customer={abonoFor ? { id: abonoFor.id, name: abonoFor.name, pending_balance: abonoFor.pending_balance ?? 0 } : null}
       />
 
       <DriverLoadDialog

@@ -40,8 +40,8 @@ export function ReceiptSheet({ open, onOpenChange, args }: Props) {
   });
 
   const data: ReceiptData | null = useMemo(
-    () => (q.data ? { ...q.data, previousBalance: args?.previousBalance ?? null } : null),
-    [q.data, args?.previousBalance],
+    () => (q.data ? { ...q.data, account: args?.account ?? null } : null),
+    [q.data, args?.account],
   );
 
   useEffect(() => {

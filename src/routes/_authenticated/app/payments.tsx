@@ -6,6 +6,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SelectItem } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ReceivablesTab } from "@/components/admin/receivables-tab";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -36,6 +38,26 @@ const methodLabel: Record<string, string> = {
 };
 
 function PaymentsPage() {
+  return (
+    <div className="space-y-4">
+      <PageHeader title="Pagos" description="Cobros del día y cuentas por cobrar." />
+      <Tabs defaultValue="daily" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="daily">Cobros del día</TabsTrigger>
+          <TabsTrigger value="receivables">Cuentas por cobrar</TabsTrigger>
+        </TabsList>
+        <TabsContent value="daily" className="mt-0">
+          <DailyPayments />
+        </TabsContent>
+        <TabsContent value="receivables" className="mt-0">
+          <ReceivablesTab />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function DailyPayments() {
   const today = todayInTZ();
   const [dateFrom, setDateFrom] = useState(today);
   const [dateTo, setDateTo] = useState(today);
@@ -82,6 +104,7 @@ function PaymentsPage() {
     );
     return sort(filtered, (r, key) => {
       if (key === "amount") return r.amount;
+      if (key === "amount_paid") return r.amount_paid;
       if (key === "paid_at") return new Date(r.paid_at).getTime();
       return (r as Record<string, unknown>)[key];
     });
@@ -90,12 +113,18 @@ function PaymentsPage() {
   const pagination = usePagination(tableRows, undefined, [search, sortKey, sortDir, dateFrom, dateTo, routeId, driverId, method, status, origin]);
 
   const totals = useMemo(() => {
-    const paid = tableRows.filter((p) => p.status === "paid");
+    // Cash received = amount_paid: partial payments, extra paid on old debt and abonos included.
     const byMethod: Record<string, number> = { cash: 0, transfer: 0, credit: 0, other: 0 };
-    for (const p of paid) byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount;
+    for (const p of tableRows) {
+      if (p.amount_paid > 0) byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount_paid;
+    }
     return {
-      total: paid.reduce((a, p) => a + p.amount, 0),
-      pending: tableRows.filter((p) => p.status === "pending").reduce((a, p) => a + p.amount, 0),
+      total: tableRows.reduce((a, p) => a + p.amount_paid, 0),
+      abonos: tableRows.filter((p) => p.is_abono).reduce((a, p) => a + p.amount_paid, 0),
+      // Sold in the period but not collected (credit, or the unpaid part of a partial payment).
+      pending: tableRows
+        .filter((p) => !p.is_abono)
+        .reduce((a, p) => a + Math.max(0, p.amount - p.amount_paid), 0),
       byMethod,
       count: tableRows.length,
     };
@@ -111,8 +140,10 @@ function PaymentsPage() {
         ruta: r.route_name ?? "",
         cliente: r.customer_name ?? "",
         monto: r.amount,
+        recibido: r.amount_paid,
+        debe: r.is_abono ? 0 : Math.max(0, r.amount - r.amount_paid),
         metodo: methodLabel[r.method] ?? r.method,
-        estado: r.status === "paid" ? "Pagado" : "Pendiente",
+        estado: r.status === "paid" ? "Pagado" : r.amount_paid > 0 ? "Parcial" : "Pendiente",
         origen: r.from_delivery ? "Venta entrega" : "Abono manual",
         nota: r.note ?? "",
       })),
@@ -121,8 +152,6 @@ function PaymentsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Pagos" description="Cobros del día y pendientes." />
-
       <TableToolbar
         search
         searchValue={search}
@@ -186,18 +215,19 @@ function PaymentsPage() {
           chartLabel="Cobros por método de pago"
         />
         <StatCardSimple
-          label="Efectivo"
-          value={totals.byMethod.cash}
+          label="Abonos"
+          value={totals.abonos}
           mode="money"
-          sub="cobrado en efectivo"
+          sub="incluidos en el total cobrado"
         />
         <StatCardSimple
-          label="Pendiente"
+          label="A crédito"
           value={totals.pending}
           mode="money"
           highlight={totals.pending > 0}
           badge={totals.pending > 0 ? "Por cobrar" : undefined}
           badgeVariant="down"
+          sub="vendido sin cobrar"
         />
       </StatGrid>
 
@@ -214,12 +244,14 @@ function PaymentsPage() {
               <SortableTableHead label="Estado" sortKey="status" activeKey={sortKey} direction={sortDir} onSort={toggle} />
               <TableHead>Origen</TableHead>
               <SortableTableHead label="Monto" sortKey="amount" activeKey={sortKey} direction={sortDir} onSort={toggle} className="text-right" />
+              <SortableTableHead label="Recibido" sortKey="amount_paid" activeKey={sortKey} direction={sortDir} onSort={toggle} className="text-right" />
+              <TableHead className="text-right">Debe</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableStatusRow colSpan={8} loading={isLoading} />
+            <TableStatusRow colSpan={10} loading={isLoading} />
             {!isLoading && tableRows.length === 0 && (
-              <TableStatusRow colSpan={8} empty emptyMessage="Sin pagos para los filtros seleccionados." />
+              <TableStatusRow colSpan={10} empty emptyMessage="Sin pagos para los filtros seleccionados." />
             )}
             {pagination.paginatedItems.map((r) => (
               <TableRow key={r.id}>
@@ -230,13 +262,19 @@ function PaymentsPage() {
                 <TableCell>{r.route_name ?? "—"}</TableCell>
                 <TableCell>{r.driver_name ?? "—"}</TableCell>
                 <TableCell>{methodLabel[r.method] ?? r.method}</TableCell>
-                <TableCell><PaymentStatusBadge status={r.status} /></TableCell>
+                <TableCell><PaymentStatusBadge status={r.status} amountPaid={r.amount_paid} /></TableCell>
                 <TableCell>
                   <StatusBadge tone={r.from_delivery ? "info" : "neutral"}>
                     {r.from_delivery ? "Venta entrega" : "Abono manual"}
                   </StatusBadge>
                 </TableCell>
                 <TableCell className="text-right tabular-nums font-medium">{fmtMoney(r.amount)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtMoney(r.amount_paid)}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {!r.is_abono && r.amount - r.amount_paid > 0.004
+                    ? <span className="font-medium text-rose-600">{fmtMoney(r.amount - r.amount_paid)}</span>
+                    : <span className="text-muted-foreground">—</span>}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

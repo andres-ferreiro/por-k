@@ -1,16 +1,12 @@
 import {
   Add01Icon,
   ArrowDown01Icon,
-  ArrowLeftRightIcon,
   ArrowUp01Icon,
-  BanknoteIcon,
   CancelCircleIcon,
   Camera01Icon,
   CheckmarkCircle02Icon,
   Clock01Icon,
-  CreditCardIcon,
   MinusSignIcon,
-  MoreHorizontalIcon,
   Tag01Icon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
@@ -26,7 +22,6 @@ import {
   getCustomerPricedProducts,
   getTodayDeliveryDetail,
   getPhotoViewUrls,
-  settlePendingBalance,
 } from "@/lib/api/driver.functions";
 import { getMyDispatchStock } from "@/lib/api/dispatches.functions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,10 +29,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { captureCurrentLocation, reverseGeocode } from "@/lib/geocode";
 import { useReceipt } from "@/components/driver/receipt-provider";
+import {
+  ReceivedField,
+  modeForSaved,
+  receivedFor,
+  type MoneyMethod,
+  type ReceivedMode,
+} from "@/components/driver/received-field";
+import { visitBalance } from "@/lib/account";
 
 type Status = "delivered" | "pending" | "failed";
-type Method = "cash" | "transfer" | "credit" | "other";
-type PayStatus = "paid" | "pending";
 type FailureReason = "closed" | "no_order" | "other";
 
 interface Props {
@@ -53,13 +54,6 @@ const STATUSES: { value: Status; label: string; icon: typeof CheckmarkCircle02Ic
   { value: "failed", label: "Fallido", icon: CancelCircleIcon, cls: "border-rose-400", activeCls: "bg-rose-600 text-white border-rose-600" },
 ];
 
-const METHODS: { value: Method; label: string; icon: typeof BanknoteIcon }[] = [
-  { value: "cash", label: "Efectivo", icon: BanknoteIcon },
-  { value: "transfer", label: "Transfer.", icon: ArrowLeftRightIcon },
-  { value: "credit", label: "Crédito", icon: CreditCardIcon },
-  { value: "other", label: "Otro", icon: MoreHorizontalIcon },
-];
-
 const fmt = (n: number) => n.toLocaleString("es", { style: "currency", currency: "MXN", minimumFractionDigits: 2 });
 
 export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell = false }: Props) {
@@ -70,20 +64,18 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
   const [failurePhotoPath, setFailurePhotoPath] = useState<string | null>(null);
   const [qty, setQty] = useState<Record<string, number>>({});
   const [retQty, setRetQty] = useState<Record<string, number>>({});
-  const [method, setMethod] = useState<Method>("cash");
-  const [payStatus, setPayStatus] = useState<PayStatus>("paid");
+  const [method, setMethod] = useState<MoneyMethod>("cash");
+  // How much the customer handed over. Default "Solo venta" = same as the old "Pagado".
+  const [receivedMode, setReceivedMode] = useState<ReceivedMode>("sale");
+  const [customReceived, setCustomReceived] = useState(0);
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [keypadFor, setKeypadFor] = useState<{ id: string; type: "sell" | "return"; name: string } | null>(null);
 
-  const [settlePending, setSettlePending] = useState(false);
-  const [settleMethod, setSettleMethod] = useState<Method>("cash");
-
   const qc = useQueryClient();
   const { showReceipt } = useReceipt();
   const save = useServerFn(saveDeliveryVisit);
-  const settle = useServerFn(settlePendingBalance);
   const getProducts = useServerFn(getCustomerPricedProducts);
   const getDetail = useServerFn(getTodayDeliveryDetail);
   const viewUrls = useServerFn(getPhotoViewUrls);
@@ -127,15 +119,16 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
     setQty(Object.fromEntries(d.items.map((i: any) => [i.product_id, i.quantity])));
     setRetQty(Object.fromEntries(d.returns.map((r: any) => [r.product_id, r.quantity])));
     if (d.payment) {
-      setMethod(d.payment.method as Method);
-      setPayStatus(d.payment.status as PayStatus);
+      setMethod(d.payment.method === "credit" ? "cash" : (d.payment.method as MoneyMethod));
+      const saved = modeForSaved(d.payment.amount_paid, d.payment.amount);
+      setReceivedMode(saved.mode);
+      setCustomReceived(saved.custom);
     } else {
       setMethod("cash");
-      setPayStatus("paid");
+      setReceivedMode("sale");
+      setCustomReceived(0);
     }
     setShowPayment(false);
-    setSettlePending(false);
-    setSettleMethod("cash");
     setExistingPhotoUrl(null);
     if (d.delivery?.photo_url) {
       viewUrls({ data: { bucket: "delivery-photos", paths: [d.delivery.photo_url] } })
@@ -160,6 +153,12 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
       }, 0),
     [products, qty, retQty],
   );
+
+  // Balance BEFORE this visit. The server subtracts what this same visit already left unpaid,
+  // so re-opening a saved visit does not count today's own sale twice.
+  const previousBalance = detailQ.data?.previous_balance ?? customer?.pending_balance ?? 0;
+  const receivedNow = receivedFor(receivedMode, customReceived, total, previousBalance);
+  const { due: totalDue, left: leftToPay, exceeds: receivedExceeds } = visitBalance(total, previousBalance, receivedNow);
 
   const sellCount = useMemo(() => Object.values(qty).filter((q) => q > 0).length, [qty]);
   const retCount = useMemo(() => Object.values(retQty).filter((q) => q > 0).length, [retQty]);
@@ -201,24 +200,21 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
           failure_photo_path: status === "failed" ? failurePhotoPath : null,
           items: status === "delivered" ? items : [],
           returns,
-          payment: { method, status: payStatus },
+          // The database derives paid / partial / on credit from the amount received.
+          payment: { method, amount_received: status === "delivered" ? receivedNow : undefined },
           location,
         },
       });
-
-      // If the driver is settling the pending balance, record it as a separate payment
-      const settledNow = settlePending && pendingBalance > 0;
-      if (settledNow) {
-        await settle({
-          data: { customer_id: customer.id, method: settleMethod },
-        });
-      }
 
       return {
         deliveryId: saved.delivery_id as string,
         status,
         total: Number(saved.total ?? 0),
-        previousBalance: pendingBalance > 0 ? { amount: pendingBalance, settled: settledNow } : null,
+        account: {
+          previousBalance: Number(saved.previous_balance ?? 0),
+          received: Number(saved.received ?? 0),
+          balance: Number(saved.new_balance ?? 0),
+        },
       };
     },
     onSuccess: (result) => {
@@ -229,7 +225,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
       // finishes closing before the receipt drawer opens.
       if (result && result.status === "delivered" && result.total > 0) {
         setTimeout(
-          () => showReceipt({ deliveryId: result.deliveryId, previousBalance: result.previousBalance }),
+          () => showReceipt({ deliveryId: result.deliveryId, account: result.account }),
           350,
         );
       }
@@ -239,7 +235,9 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
   if (!customer) return null;
   const isDelivered = status === "delivered";
-  const pendingBalance = customer.pending_balance ?? 0;
+  // Collecting is possible with a sale or with old debt to collect.
+  // (also while an amount is set, so a blocked Save is never unexplained)
+  const showCollect = isDelivered && (total > 0 || previousBalance > 0 || receivedNow > 0);
 
   return (
     <>
@@ -426,65 +424,6 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
                   })}
                 </TabsContent>
 
-            {/* Payment — collapsible */}
-            <div className="rounded-lg border overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowPayment((v) => !v)}
-                className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium"
-              >
-                <span className="flex items-center gap-2">
-                  Método de pago
-                  <span className="text-xs font-normal text-muted-foreground">
-                    ({METHODS.find((m) => m.value === method)?.label ?? "Efectivo"} · {payStatus === "paid" ? "Pagado" : "Pendiente"})
-                  </span>
-                </span>
-                {showPayment
-                  ? <Icon icon={ArrowUp01Icon} className="h-4 w-4 text-muted-foreground" />
-                  : <Icon icon={ArrowDown01Icon} className="h-4 w-4 text-muted-foreground" />}
-              </button>
-              {showPayment && (
-                <div className="px-3 pb-3 space-y-2 border-t">
-                  <div className="grid grid-cols-4 gap-1.5 pt-2">
-                    {METHODS.map((m) => {
-                      const active = method === m.value;
-                      return (
-                        <button
-                          key={m.value}
-                          type="button"
-                          onClick={() => setMethod(m.value)}
-                          className={`flex flex-col items-center gap-1 px-1 py-2 rounded-lg border-2 text-[11px] font-medium transition-colors ${
-                            active ? "bg-primary text-primary-foreground border-primary" : "border-input bg-background"
-                          }`}
-                        >
-                          <Icon icon={m.icon} className="h-4 w-4" />
-                          {m.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["paid", "pending"] as PayStatus[]).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setPayStatus(s)}
-                        className={`py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
-                          payStatus === s
-                            ? s === "paid"
-                              ? "bg-emerald-600 text-white border-emerald-600"
-                              : "bg-amber-500 text-white border-amber-500"
-                            : "border-input bg-background"
-                        }`}
-                      >
-                        {s === "paid" ? "Pagado" : "Pendiente"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Notes & Photo — collapsible */}
             <div className="rounded-lg border overflow-hidden">
               <button
@@ -578,50 +517,55 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
 
           {/* Fixed bottom bar */}
           <div className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
-            {pendingBalance > 0 && (
-              <div className="mb-2 rounded-lg border border-rose-200 dark:border-rose-800 overflow-hidden">
+            {showCollect && (
+              <div className="mb-2 rounded-lg border overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => setSettlePending((v) => !v)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-rose-50 dark:bg-rose-950/20"
+                  onClick={() => setShowPayment((v) => !v)}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2"
                 >
-                  <span className="text-sm font-medium text-rose-700 dark:text-rose-400">Saldo pendiente</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmt(pendingBalance)}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium transition-colors ${settlePending ? "bg-emerald-600 text-white" : "bg-rose-200 dark:bg-rose-800 text-rose-700 dark:text-rose-300"}`}>
-                      {settlePending ? "Cobrado ✓" : "Cobrar"}
+                  <div className="text-left">
+                    <div className="text-xs text-muted-foreground">Total a cobrar</div>
+                    <div className="text-xl font-bold tabular-nums leading-tight text-primary">{fmt(totalDue)}</div>
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className={`truncate rounded-md px-2 py-1 text-xs font-semibold tabular-nums ${
+                        receivedExceeds
+                          ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400"
+                          : leftToPay <= 0.004
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+                      }`}
+                    >
+                      {receivedExceeds
+                        ? "Excede lo que debe"
+                        : leftToPay <= 0.004
+                          ? `Recibido ${fmt(receivedNow)}`
+                          : `Recibido ${fmt(receivedNow)} · Debe ${fmt(leftToPay)}`}
                     </span>
+                    {showPayment
+                      ? <Icon icon={ArrowUp01Icon} className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      : <Icon icon={ArrowDown01Icon} className="h-4 w-4 shrink-0 text-muted-foreground" />}
                   </div>
                 </button>
-                {settlePending && (
-                  <div className="px-3 pb-2.5 pt-2 border-t border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/10">
-                    <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">Método para el saldo pendiente:</p>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {METHODS.map((m) => {
-                        const active = settleMethod === m.value;
-                        return (
-                          <button
-                            key={m.value}
-                            type="button"
-                            onClick={() => setSettleMethod(m.value)}
-                            className={`flex flex-col items-center gap-1 px-1 py-2 rounded-lg border-2 text-[11px] font-medium transition-colors ${
-                              active ? "bg-emerald-600 text-white border-emerald-600" : "border-input bg-background"
-                            }`}
-                          >
-                            <Icon icon={m.icon} className="h-4 w-4" />
-                            {m.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                {showPayment && (
+                  <div className="max-h-[46dvh] overflow-y-auto border-t px-3 py-3">
+                    <ReceivedField
+                      total={total}
+                      previous={previousBalance}
+                      mode={receivedMode}
+                      custom={customReceived}
+                      onMode={(m) => setReceivedMode(m)}
+                      onCustom={(n) => {
+                        setCustomReceived(n);
+                        setReceivedMode("custom");
+                      }}
+                      method={method}
+                      onMethod={setMethod}
+                    />
                   </div>
                 )}
-              </div>
-            )}
-            {isDelivered && total > 0 && (
-              <div className="flex items-center justify-between mb-2.5 px-1">
-                <span className="text-sm text-muted-foreground">Total a cobrar</span>
-                <span className="text-xl font-bold tabular-nums text-primary">{fmt(total + (settlePending ? pendingBalance : 0))}</span>
               </div>
             )}
             <div className="flex gap-2">
@@ -636,7 +580,7 @@ export function DeliverySheet({ open, onOpenChange, customer, autoLocationOnSell
               <Button
                 className="flex-2 flex-[2] h-12 font-semibold"
                 onClick={() => mut.mutate()}
-                disabled={mut.isPending || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
+                disabled={mut.isPending || (isDelivered && receivedExceeds) || (status === "failed" && failureReason === "closed" && !failurePhotoPath)}
               >
                 {mut.isPending ? "Guardando…" : "Guardar"}
               </Button>

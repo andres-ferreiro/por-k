@@ -20,9 +20,11 @@ import {
   Cancel01Icon,
   Search01Icon,
   PrinterIcon,
+  Wallet01Icon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { DeliverySheet } from "@/components/driver/delivery-sheet";
+import { AbonoSheet } from "@/components/driver/abono-sheet";
 import { useReceipt } from "@/components/driver/receipt-provider";
 import { LocationDrawer } from "@/components/driver/location-drawer";
 import { PreorderRoutePage, PreorderRouteLoading } from "@/components/driver/preorder-route-page";
@@ -157,6 +159,7 @@ function DispatchRoutePage({ data }: {
     (stockQ.data?.has_loaded_stock ?? false) && (stockQ.data?.total_units ?? 1) === 0;
   const [deliveryFor, setDeliveryFor] = useState<Customer | null>(null);
   const [locationFor, setLocationFor] = useState<Customer | null>(null);
+  const [abonoFor, setAbonoFor] = useState<Customer | null>(null);
   const [search, setSearch] = useState("");
 
   if (!data?.route) return null;
@@ -256,7 +259,7 @@ function DispatchRoutePage({ data }: {
                       <div className="flex items-center gap-1.5 shrink-0">
                         {c.pending_balance > 0 && (
                           <StatusBadge tone="danger" className="shrink-0 text-[10px] px-1.5 normal-case tracking-normal">
-                            {fmt(c.pending_balance)} pend.
+                            Debe {fmt(c.pending_balance)}
                           </StatusBadge>
                         )}
                         <StatusBadge tone={meta.tone} className="shrink-0 normal-case tracking-normal">
@@ -295,6 +298,11 @@ function DispatchRoutePage({ data }: {
                       <a href={`tel:${c.phone}`}>
                         <Icon icon={CallIcon} className="h-4 w-4" /> Llamar
                       </a>
+                    </Button>
+                  )}
+                  {c.pending_balance > 0 && (
+                    <Button variant="outline" size="sm" className="flex-1 min-w-[120px]" onClick={() => setAbonoFor(c)}>
+                      <Icon icon={Wallet01Icon} className="h-4 w-4" /> Abono
                     </Button>
                   )}
                 </div>
@@ -336,6 +344,12 @@ function DispatchRoutePage({ data }: {
             : null
         }
         autoLocationOnSell={canWrite}
+      />
+
+      <AbonoSheet
+        open={!!abonoFor}
+        onOpenChange={(o) => !o && setAbonoFor(null)}
+        customer={abonoFor ? { id: abonoFor.id, name: abonoFor.name, pending_balance: abonoFor.pending_balance } : null}
       />
 
       <LocationDrawer

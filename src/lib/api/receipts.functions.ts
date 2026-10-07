@@ -20,7 +20,7 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
     const { data: del, error } = await supabase
       .from("deliveries")
       .select(
-        "id, status, updated_at, branch_id, customer_id, driver_id, customers(name, phone), branches(name, address, phone)",
+        "id, status, updated_at, branch_id, customer_id, driver_id, customers(name, phone, pending_balance), branches(name, address, phone)",
       )
       .eq("id", data.delivery_id)
       .eq("driver_id", userId)
@@ -42,7 +42,7 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
         .eq("delivery_id", data.delivery_id),
       supabase
         .from("payments")
-        .select("method, status")
+        .select("method, status, amount_paid")
         .eq("delivery_id", data.delivery_id)
         .maybeSingle(),
       supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
@@ -109,7 +109,11 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
 
     const customer = (del as any).customers;
     const branch = (del as any).branches;
-    const pay = payRes.data as { method: ReceiptPaymentMethod; status: "paid" | "pending" } | null;
+    const pay = payRes.data as {
+      method: ReceiptPaymentMethod;
+      status: "paid" | "pending";
+      amount_paid: number | string;
+    } | null;
 
     return {
       folio: String(del.id).replace(/-/g, "").slice(-6).toUpperCase(),
@@ -126,6 +130,9 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
       grossAmount: round2(totals.grossAmount),
       returnAmount: round2(totals.returnAmount),
       total: round2(totals.netAmount),
-      payment: pay ? { method: pay.method, status: pay.status } : null,
+      payment: pay
+        ? { method: pay.method, status: pay.status, amountPaid: round2(Number(pay.amount_paid ?? 0)) }
+        : null,
+      currentBalance: round2(Number(customer?.pending_balance ?? 0)),
     };
   });

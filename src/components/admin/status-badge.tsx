@@ -38,7 +38,21 @@ export function ActiveStatusBadge({
   );
 }
 
-export function PaymentStatusBadge({ status }: { status: "paid" | "pending" | string }) {
+export function PaymentStatusBadge({
+  status,
+  amountPaid,
+}: {
+  status: "paid" | "pending" | string;
+  /** When given, a pending payment with something received is shown as "Parcial". */
+  amountPaid?: number;
+}) {
+  if (status !== "paid" && amountPaid !== undefined) {
+    return amountPaid > 0 ? (
+      <StatusBadge tone="warning">Parcial</StatusBadge>
+    ) : (
+      <StatusBadge tone="danger">Pendiente</StatusBadge>
+    );
+  }
   return (
     <StatusBadge tone={status === "paid" ? "success" : "warning"}>
       {status === "paid" ? "Pagado" : "Pendiente"}

@@ -18,6 +18,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useReceipt } from "@/components/driver/receipt-provider";
+import { ReceivedField, receivedFor, type MoneyMethod, type ReceivedMode } from "@/components/driver/received-field";
+import { visitBalance } from "@/lib/account";
 
 type Status = "delivered" | "failed";
 type FailureReason = "closed" | "other";
@@ -37,6 +39,10 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
   const [failureReason, setFailureReason] = useState<FailureReason>("other");
   const [failurePhotoPath, setFailurePhotoPath] = useState<string | null>(null);
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  // Preorders are on credit unless the driver collects something at the door.
+  const [receivedMode, setReceivedMode] = useState<ReceivedMode>("none");
+  const [customReceived, setCustomReceived] = useState(0);
+  const [method, setMethod] = useState<MoneyMethod>("cash");
 
   const qc = useQueryClient();
   const { showReceipt } = useReceipt();
@@ -66,6 +72,9 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
       setFailureReason("other");
       setFailurePhotoPath(null);
     }
+    setReceivedMode("none");
+    setCustomReceived(0);
+    setMethod("cash");
   }, [open, detailQ.data]);
 
   useEffect(() => {
@@ -82,6 +91,9 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
     [items],
   );
   const isDelivered = detailQ.data?.delivery?.status === "delivered";
+  const previousBalance = detailQ.data?.previous_balance ?? 0;
+  const receivedNow = receivedFor(receivedMode, customReceived, total, previousBalance);
+  const { exceeds: receivedExceeds } = visitBalance(total, previousBalance, receivedNow);
   const photoChanged = photoPath !== (detailQ.data?.delivery?.photo_url ?? null);
 
   const saveMut = useMutation({
@@ -94,6 +106,10 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
           failure_reason: status === "failed" ? failureReason : null,
           failure_photo_path: status === "failed" ? failurePhotoPath : null,
           comment: comment || null,
+          // Only on the first confirmation; re-saving the note photo must not touch payments.
+          ...(status === "delivered" && !isDelivered
+            ? { amount_received: receivedNow, payment_method: method }
+            : {}),
         },
       }),
     onSuccess: (res) => {
@@ -105,7 +121,12 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
       toast.success(status === "delivered" ? "Entrega confirmada" : "Entrega marcada como fallida");
       onOpenChange(false);
       if (firstDelivery && res?.delivery_id && Number(res.total) > 0) {
-        setTimeout(() => showReceipt({ deliveryId: res.delivery_id as string }), 350);
+        const account = {
+          previousBalance,
+          received: Number(res.received ?? 0),
+          balance: Number(res.new_balance ?? 0),
+        };
+        setTimeout(() => showReceipt({ deliveryId: res.delivery_id as string, account }), 350);
       }
     },
     onError: (e: any) => toast.error(e?.message ?? "Error"),
@@ -178,6 +199,24 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
                     </div>
                   )}
 
+                  {status === "delivered" && (
+                    <div className="rounded-lg border p-3">
+                      <ReceivedField
+                        total={total}
+                        previous={previousBalance}
+                        mode={receivedMode}
+                        custom={customReceived}
+                        onMode={(m) => setReceivedMode(m)}
+                        onCustom={(n) => {
+                          setCustomReceived(n);
+                          setReceivedMode("custom");
+                        }}
+                        method={method}
+                        onMethod={setMethod}
+                      />
+                    </div>
+                  )}
+
                   {status === "failed" && (
                     <div className="space-y-3">
                       <div className="flex gap-2">
@@ -211,7 +250,7 @@ export function PreorderDeliverySheet({ open, onOpenChange, customer }: Props) {
                   <Button
                     className="w-full h-12"
                     onClick={() => saveMut.mutate()}
-                    disabled={saveMut.isPending || (status === "delivered" && !photoPath)}
+                    disabled={saveMut.isPending || (status === "delivered" && (!photoPath || receivedExceeds))}
                   >
                     {saveMut.isPending ? "Guardando…" : "Confirmar"}
                   </Button>

@@ -5,6 +5,7 @@ import { todayInTZ, tzDayRange } from "@/lib/tz";
 import { deliveryNetTotals, deliveryPaymentAmount } from "@/lib/delivery-totals";
 import { assertSaleWithinStock, fetchDriverDayStock } from "@/lib/driver-stock";
 import { resolveDriverActiveRoute } from "@/lib/driver-route";
+import { round2 } from "@/lib/account";
 
 function todayStr(): string {
   return todayInTZ();
@@ -400,28 +401,41 @@ export const getTodayDeliveryDetail = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const today = todayStr();
+    // Balance as it stands now. Whatever THIS visit left unpaid is already inside it,
+    // so it is subtracted below to get "balance before this visit".
+    const { data: cust } = await supabase
+      .from("customers").select("pending_balance").eq("id", data.customer_id).maybeSingle();
+    const currentBalance = Number(cust?.pending_balance ?? 0);
+
+    const none = { delivery: null, items: [], returns: [], payment: null, previous_balance: Math.max(0, round2(currentBalance)) };
+
     const route = await resolveDriverActiveRoute(supabase, userId, today);
     const routeId = route?.id;
-    if (!routeId) return { delivery: null, items: [], returns: [], payment: null };
+    if (!routeId) return none;
 
     const { data: del } = await supabase
       .from("deliveries")
       .select("id, status, comment, photo_url, failure_reason, failure_photo_url")
       .eq("route_id", routeId).eq("customer_id", data.customer_id).eq("delivery_date", today)
       .maybeSingle();
-    if (!del) return { delivery: null, items: [], returns: [], payment: null };
+    if (!del) return none;
 
     const [{ data: items }, { data: rets }, { data: pay }] = await Promise.all([
       supabase.from("delivery_items").select("product_id, quantity, unit_price").eq("delivery_id", del.id),
       supabase.from("delivery_returns").select("product_id, quantity").eq("delivery_id", del.id),
-      supabase.from("payments").select("id, amount, method, status").eq("delivery_id", del.id).maybeSingle(),
+      supabase.from("payments").select("id, amount, amount_paid, method, status, carried_over").eq("delivery_id", del.id).maybeSingle(),
     ]);
+
+    const ownOutstanding = pay && !pay.carried_over ? Number(pay.amount) - Number(pay.amount_paid) : 0;
 
     return {
       delivery: { id: del.id, status: del.status, comment: del.comment, photo_url: del.photo_url, failure_reason: del.failure_reason, failure_photo_url: del.failure_photo_url },
       items: (items ?? []).map((i: any) => ({ product_id: i.product_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
       returns: (rets ?? []).map((r: any) => ({ product_id: r.product_id, quantity: Number(r.quantity) })),
-      payment: pay ? { method: pay.method, status: pay.status, amount: Number(pay.amount) } : null,
+      payment: pay
+        ? { method: pay.method, status: pay.status, amount: Number(pay.amount), amount_paid: Number(pay.amount_paid) }
+        : null,
+      previous_balance: Math.max(0, round2(currentBalance - ownOutstanding)),
     };
   });
 
@@ -441,7 +455,10 @@ const saveDeliveryVisitSchema = z.object({
   returns: z.array(lineSchema).max(100).default([]),
   payment: z.object({
     method: z.enum(["cash", "transfer", "credit", "other"]),
-    status: z.enum(["paid", "pending"]),
+    // Old clients send only `status`; new clients send `amount_received`.
+    status: z.enum(["paid", "pending"]).optional(),
+    /** Cash handed over. May exceed this sale: the excess pays older debt. */
+    amount_received: z.number().min(0).max(10_000_000).optional(),
   }),
   location: z
     .object({
@@ -496,6 +513,63 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       }
     }
 
+    // Prices first: the "recibido" check below needs the final total, and nothing
+    // may be written if that check fails (a half-saved visit would be worse).
+    const allProductIds = Array.from(
+      new Set([
+        ...data.items.map((i) => i.product_id),
+        ...data.returns.map((r) => r.product_id),
+      ]),
+    );
+    const priceMap = new Map<string, number>();
+    if (allProductIds.length > 0) {
+      const [{ data: prods, error: pErr }, { data: ov, error: oErr }] = await Promise.all([
+        supabase.from("products").select("id, price").in("id", allProductIds),
+        supabase.from("customer_prices").select("product_id, price")
+          .eq("customer_id", data.customer_id).in("product_id", allProductIds),
+      ]);
+      if (pErr) throw new Error(pErr.message);
+      if (oErr) throw new Error(oErr.message);
+      for (const p of prods ?? []) priceMap.set(p.id as string, Number((p as any).price));
+      for (const o of ov ?? []) priceMap.set((o as any).product_id, Number((o as any).price));
+    }
+    const plannedTotal = round2(
+      deliveryNetTotals(
+        data.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity, unit_price: priceMap.get(i.product_id) ?? 0 })),
+        data.returns.map((r) => ({ product_id: r.product_id, quantity: r.quantity, unit_price: priceMap.get(r.product_id) ?? 0 })),
+      ).netAmount,
+    );
+
+    const receivedAmount =
+      data.status === "delivered" && data.payment.amount_received !== undefined
+        ? round2(data.payment.amount_received)
+        : undefined;
+
+    // Balance before this visit = current balance minus what this same visit already left unpaid.
+    const [{ data: custRow }, { data: priorDelivery }] = await Promise.all([
+      supabase.from("customers").select("pending_balance").eq("id", data.customer_id).maybeSingle(),
+      supabase.from("deliveries").select("id")
+        .eq("route_id", route.id).eq("customer_id", data.customer_id).eq("delivery_date", today)
+        .maybeSingle(),
+    ]);
+    let ownOutstanding = 0;
+    if (priorDelivery) {
+      const { data: priorPay } = await supabase
+        .from("payments").select("amount, amount_paid, carried_over")
+        .eq("delivery_id", priorDelivery.id as string).maybeSingle();
+      if (priorPay && !priorPay.carried_over) {
+        ownOutstanding = Number(priorPay.amount) - Number(priorPay.amount_paid);
+      }
+    }
+    const previousBalance = Math.max(0, round2(Number(custRow?.pending_balance ?? 0) - ownOutstanding));
+
+    if (receivedAmount !== undefined) {
+      const mostThatCanBePaid = round2((plannedTotal > 0 ? plannedTotal : 0) + previousBalance);
+      if (receivedAmount > mostThatCanBePaid + 0.004) {
+        throw new Error("El monto recibido excede lo que debe el cliente.");
+      }
+    }
+
     // Upsert delivery
     const { data: del, error: dErr } = await supabase
       .from("deliveries")
@@ -518,26 +592,6 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       .single();
     if (dErr) throw new Error(dErr.message);
     const deliveryId = del.id as string;
-
-    // Resolve prices for sold and returned products
-    const allProductIds = Array.from(
-      new Set([
-        ...data.items.map((i) => i.product_id),
-        ...data.returns.map((r) => r.product_id),
-      ]),
-    );
-    const priceMap = new Map<string, number>();
-    if (allProductIds.length > 0) {
-      const [{ data: prods, error: pErr }, { data: ov, error: oErr }] = await Promise.all([
-        supabase.from("products").select("id, price").in("id", allProductIds),
-        supabase.from("customer_prices").select("product_id, price")
-          .eq("customer_id", data.customer_id).in("product_id", allProductIds),
-      ]);
-      if (pErr) throw new Error(pErr.message);
-      if (oErr) throw new Error(oErr.message);
-      for (const p of prods ?? []) priceMap.set(p.id as string, Number((p as any).price));
-      for (const o of ov ?? []) priceMap.set((o as any).product_id, Number((o as any).price));
-    }
 
     // Replace items
     await supabase.from("delivery_items").delete().eq("delivery_id", deliveryId);
@@ -578,17 +632,31 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
     const { data: existingPay } = await supabase
       .from("payments").select("id").eq("delivery_id", deliveryId).maybeSingle();
 
+    // Only real money methods are valid for a received amount ("credit" means nothing was received).
+    const moneyMethod = data.payment.method === "credit" ? "other" : data.payment.method;
+
     if (data.status === "delivered" && total > 0) {
-      const payRow = {
-        branch_id: route.branch_id,
-        route_id: route.id,
+      const payRow: {
+        branch_id: string; route_id: string; customer_id: string; driver_id: string; delivery_id: string;
+        amount: number; method: "cash" | "transfer" | "credit" | "other"; status: "paid" | "pending";
+        amount_paid?: number;
+      } = {
+        branch_id: route.branch_id as string,
+        route_id: route.id as string,
         customer_id: data.customer_id,
         driver_id: userId,
         delivery_id: deliveryId,
         amount: Number(total.toFixed(2)),
         method: data.payment.method,
-        status: data.payment.status,
+        status: data.payment.status ?? "paid",
       };
+      if (receivedAmount !== undefined) {
+        // New clients: the amount received decides everything; the database derives the status
+        // and writes the ledger. Nothing received = on credit.
+        payRow.amount_paid = receivedAmount;
+        payRow.method = receivedAmount > 0 ? moneyMethod : "credit";
+        payRow.status = receivedAmount >= payRow.amount ? "paid" : "pending";
+      }
       if (existingPay) {
         const { error } = await supabase.from("payments").update(payRow).eq("id", existingPay.id);
         if (error) throw new Error(error.message);
@@ -598,6 +666,22 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       }
     } else if (existingPay) {
       await supabase.from("payments").delete().eq("id", existingPay.id);
+    }
+
+    // Visit without a sale (or nothing delivered) but money collected for older debt:
+    // that is a standalone abono.
+    if (
+      receivedAmount !== undefined &&
+      receivedAmount > 0 &&
+      !(data.status === "delivered" && total > 0)
+    ) {
+      const { error: abonoErr } = await supabase.rpc("register_customer_payment", {
+        p_customer_id: data.customer_id,
+        p_amount: receivedAmount,
+        p_method: moneyMethod,
+        p_note: "Abono durante la visita",
+      });
+      if (abonoErr) throw new Error(abonoErr.message);
     }
 
     if (data.location) {
@@ -624,7 +708,18 @@ export const saveDeliveryVisit = createServerFn({ method: "POST" })
       }
     }
 
-    return { ok: true, delivery_id: deliveryId, total };
+    const { data: after } = await supabase
+      .from("customers").select("pending_balance").eq("id", data.customer_id).maybeSingle();
+
+    return {
+      ok: true,
+      delivery_id: deliveryId,
+      total,
+      /** Cash recorded in this save (undefined for old-style payloads). */
+      received: receivedAmount ?? null,
+      previous_balance: previousBalance,
+      new_balance: Number(after?.pending_balance ?? 0),
+    };
   });
 
 export const listTodayDeliveries = createServerFn({ method: "POST" })
@@ -739,7 +834,7 @@ export const listTodayPayments = createServerFn({ method: "POST" })
     const { data: rows, error } = await supabase
       .from("payments")
       .select(
-        "id, amount, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
+        "id, amount, amount_paid, is_abono, status, method, note, paid_at, customer_id, delivery_id, customers(name), deliveries(delivery_items(product_id, quantity, unit_price, line_total), delivery_returns(product_id, quantity))",
       )
       .eq("driver_id", userId)
       .gte("paid_at", startISO)
@@ -757,6 +852,10 @@ export const listTodayPayments = createServerFn({ method: "POST" })
       return {
         id: r.id as string,
         amount: deliveryPaymentAmount(Number(r.amount), items, returns),
+        /** Cash actually received (partial payments, over-payments and abonos included). */
+        amount_paid: Number(r.amount_paid ?? 0),
+        is_abono: Boolean(r.is_abono),
+        delivery_id: (r.delivery_id as string | null) ?? null,
         status: r.status as "paid" | "pending",
         method: r.method as "cash" | "transfer" | "credit" | "other",
         note: (r.note as string | null) ?? null,
@@ -955,7 +1054,7 @@ export const getPreorderDeliveryDetail = createServerFn({ method: "POST" })
       .limit(1);
     const route = (routes ?? [])[0] as any;
     if (!route || route.route_mode !== "preorder") {
-      return { order: null, items: [], delivery: null };
+      return { order: null, items: [], delivery: null, previous_balance: 0 };
     }
 
     const { data: order } = await supabase
@@ -969,7 +1068,7 @@ export const getPreorderDeliveryDetail = createServerFn({ method: "POST" })
       .eq("delivery_date", today)
       .neq("status", "cancelled")
       .maybeSingle();
-    if (!order) return { order: null, items: [], delivery: null };
+    if (!order) return { order: null, items: [], delivery: null, previous_balance: 0 };
 
     const { data: del } = await supabase
       .from("deliveries")
@@ -978,6 +1077,21 @@ export const getPreorderDeliveryDetail = createServerFn({ method: "POST" })
       .eq("customer_id", data.customer_id)
       .eq("delivery_date", today)
       .maybeSingle();
+
+    // Balance before this visit (what this same visit left unpaid is taken out).
+    const { data: cust } = await supabase
+      .from("customers").select("pending_balance").eq("id", data.customer_id).maybeSingle();
+    let ownOutstanding = 0;
+    let amountPaid = 0;
+    if (del) {
+      const { data: pay } = await supabase
+        .from("payments").select("amount, amount_paid, carried_over").eq("delivery_id", del.id).maybeSingle();
+      if (pay) {
+        amountPaid = Number(pay.amount_paid);
+        if (!pay.carried_over) ownOutstanding = Number(pay.amount) - Number(pay.amount_paid);
+      }
+    }
+    const previousBalance = Math.max(0, round2(Number(cust?.pending_balance ?? 0) - ownOutstanding));
 
     const items = ((order as any).customer_order_items ?? []).map((i: any) => ({
       product_id: i.product_id as string,
@@ -1000,12 +1114,17 @@ export const getPreorderDeliveryDetail = createServerFn({ method: "POST" })
             comment: del.comment,
           }
         : null,
+      previous_balance: previousBalance,
+      amount_paid: amountPaid,
     };
   });
 
 const confirmPreorderSchema = z.object({
   customer_id: z.string().uuid(),
   status: z.enum(["delivered", "failed"]),
+  /** Cash received at delivery (optional; default 0 = on credit, as before). */
+  amount_received: z.number().min(0).max(10_000_000).optional(),
+  payment_method: z.enum(["cash", "transfer", "other"]).optional(),
   photo_path: z.string().max(500).nullable().optional(),
   failure_reason: preorderFailureReasonEnum.nullable().optional(),
   failure_photo_path: z.string().max(500).nullable().optional(),
@@ -1044,6 +1163,35 @@ export const confirmPreorderDelivery = createServerFn({ method: "POST" })
       .maybeSingle();
     if (oErr) throw new Error(oErr.message);
     if (!order) throw new Error("No hay pedido para este cliente hoy.");
+
+    // Optional cash received at delivery. Validated before anything is written.
+    const receivedAmount =
+      data.status === "delivered" && data.amount_received !== undefined
+        ? round2(data.amount_received)
+        : undefined;
+    if (receivedAmount !== undefined && receivedAmount > 0) {
+      const orderTotal = round2(
+        (((order as any).customer_order_items ?? []) as any[]).reduce(
+          (s, i) => s + Number(i.quantity) * Number(i.unit_price), 0),
+      );
+      const [{ data: cust }, { data: priorDel }] = await Promise.all([
+        supabase.from("customers").select("pending_balance").eq("id", data.customer_id).maybeSingle(),
+        supabase.from("deliveries").select("id")
+          .eq("route_id", route.id).eq("customer_id", data.customer_id).eq("delivery_date", today)
+          .maybeSingle(),
+      ]);
+      let own = 0;
+      if (priorDel) {
+        const { data: priorPay } = await supabase
+          .from("payments").select("amount, amount_paid, carried_over")
+          .eq("delivery_id", priorDel.id as string).maybeSingle();
+        if (priorPay && !priorPay.carried_over) own = Number(priorPay.amount) - Number(priorPay.amount_paid);
+      }
+      const previous = Math.max(0, round2(Number(cust?.pending_balance ?? 0) - own));
+      if (receivedAmount > round2(orderTotal + previous) + 0.004) {
+        throw new Error("El monto recibido excede lo que debe el cliente.");
+      }
+    }
 
     const { data: del, error: dErr } = await supabase
       .from("deliveries")
@@ -1090,16 +1238,29 @@ export const confirmPreorderDelivery = createServerFn({ method: "POST" })
         driver_id: userId,
         delivery_id: deliveryId,
         amount: Number(total.toFixed(2)),
-        method: "credit" as const,
-        status: "pending" as const,
+        method: "credit" as "cash" | "transfer" | "credit" | "other",
+        status: "pending" as "paid" | "pending",
       };
       const { data: existingPay } = await supabase
         .from("payments")
         .select("id")
         .eq("delivery_id", deliveryId)
         .maybeSingle();
-      if (existingPay) {
-        await supabase.from("payments").update(payRow).eq("id", existingPay.id);
+      if (receivedAmount !== undefined) {
+        const row = {
+          ...payRow,
+          amount_paid: receivedAmount,
+          method: receivedAmount > 0 ? (data.payment_method ?? "cash") : ("credit" as const),
+          status: receivedAmount >= payRow.amount ? ("paid" as const) : ("pending" as const),
+        };
+        const { error } = existingPay
+          ? await supabase.from("payments").update(row).eq("id", existingPay.id)
+          : await supabase.from("payments").insert(row);
+        if (error) throw new Error(error.message);
+      } else if (existingPay) {
+        // Re-saving (e.g. adding the note photo) must not wipe what was already received:
+        // touch only the amount, never status / amount_paid.
+        await supabase.from("payments").update({ amount: payRow.amount }).eq("id", existingPay.id);
       } else {
         await supabase.from("payments").insert(payRow);
       }
@@ -1117,7 +1278,16 @@ export const confirmPreorderDelivery = createServerFn({ method: "POST" })
       .eq("id", order.id);
     if (orderErr) throw new Error(orderErr.message);
 
-    return { ok: true, delivery_id: deliveryId, total };
+    const { data: balAfter } = await supabase
+      .from("customers").select("pending_balance").eq("id", data.customer_id).maybeSingle();
+
+    return {
+      ok: true,
+      delivery_id: deliveryId,
+      total,
+      received: receivedAmount ?? null,
+      new_balance: Number(balAfter?.pending_balance ?? 0),
+    };
   });
 
 // ============ SETTLE PENDING BALANCE (driver side) ============
