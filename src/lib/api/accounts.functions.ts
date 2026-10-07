@@ -50,8 +50,15 @@ export const getCustomerAccount = createServerFn({ method: "POST" })
       .limit(1000);
     if (error) throw new Error(error.message);
 
+    // Rows written in the same transaction share created_at: show the charge (sale)
+    // before the payment that settles it so the running balance never dips needlessly.
+    const ordered = [...(rows ?? [])].sort((a: any, b: any) => {
+      const t = String(a.created_at).localeCompare(String(b.created_at));
+      return t !== 0 ? t : Number(b.amount) - Number(a.amount);
+    });
+
     let running = 0;
-    const asc: AccountMovement[] = (rows ?? []).map((m: any) => {
+    const asc: AccountMovement[] = ordered.map((m: any) => {
       running = round2(running + Number(m.amount));
       return {
         id: m.id as string,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { deliveryNetTotals } from "@/lib/delivery-totals";
 import { APP_NAME } from "@/lib/brand";
-import { todayInTZ, tzDayRange } from "@/lib/tz";
+import { todayInTZ } from "@/lib/tz";
 import type { ReceiptData, ReceiptLine, ReceiptPaymentMethod } from "@/lib/receipt/types";
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -21,7 +21,7 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
     const { data: del, error } = await supabase
       .from("deliveries")
       .select(
-        "id, status, updated_at, delivery_date, branch_id, customer_id, driver_id, customers(name, phone, pending_balance), branches(name, address, phone), routes(route_mode)",
+        "id, status, created_at, updated_at, delivery_date, branch_id, customer_id, driver_id, customers(name, phone, pending_balance), branches(name, address, phone), routes(route_mode)",
       )
       .eq("id", data.delivery_id)
       .eq("driver_id", userId)
@@ -123,15 +123,17 @@ export const getDeliveryReceipt = createServerFn({ method: "POST" })
     // Pre-order routes work as credit, not as account debt: their receipt has no account block.
     const isPreorder = (del as any).routes?.route_mode === "preorder";
     if (!isPreorder && String((del as any).delivery_date) === todayInTZ()) {
-      const { startISO } = tzDayRange(String((del as any).delivery_date));
-      // Money received today for the OLD debt = ledger payments not tied to this sale's payment row.
+      // Money received for the OLD debt during THIS visit = ledger payments created after the
+      // visit was first saved (earlier abonos of the same day are already inside "balance before"),
+      // not tied to this sale's own payment row.
+      const visitStartISO = String((del as any).created_at);
       let debtPaid = 0;
       const { data: movs, error: mErr } = await (supabase as any)
         .from("customer_account_movements")
         .select("amount, payment_id")
         .eq("customer_id", (del as any).customer_id)
         .eq("kind", "payment")
-        .gte("created_at", startISO);
+        .gte("created_at", visitStartISO);
       if (!mErr) {
         for (const m of (movs ?? []) as any[]) {
           if (pay && m.payment_id === pay.id) continue;
