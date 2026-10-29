@@ -36,6 +36,7 @@ import { BranchScopeProvider } from "@/lib/branch-scope";
 import { DevDemoPanel } from "@/components/admin/dev-demo-panel";
 import { BranchSwitcher } from "@/components/admin/branch-switcher";
 import { BrandLogo } from "@/components/brand-logo";
+import { AppBannerEditor, AppBannerStrip } from "@/components/admin/app-banner";
 
 export const Route = createFileRoute("/_authenticated/app")({
   loader: async ({ context }) => {
@@ -211,8 +212,10 @@ function AdminShell() {
             <div className="min-w-0 flex-1">
               <BranchSwitcher roles={ctx.roles} ownBranchId={ctx.branchId} ownBranchName={ctx.branchName} />
             </div>
+            <AppBannerEditor />
             <UserMenu ctx={ctx} onSignOut={handleSignOut} />
           </header>
+          <AppBannerStrip />
           <div className="min-h-0 flex-1 overflow-auto p-6">
             <Outlet />
           </div>
