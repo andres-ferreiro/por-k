@@ -30,6 +30,62 @@ async function fetchProfileNames(ids: string[]): Promise<Map<string, string | nu
   return map;
 }
 
+export type CrossLoadItem = {
+  product_id: string;
+  quantity: number;
+  name: string | null;
+  unit: string | null;
+};
+
+export type CrossLoadRow = {
+  id: string;
+  created_at: string;
+  driver_id: string;
+  notes: string | null;
+  from_branch_name: string | null;
+  items: CrossLoadItem[];
+};
+
+/**
+ * Cross-branch loads for the given drivers on a day.
+ *
+ * Uses the service client on purpose: RLS only lets the *loading* branch read these rows, so the
+ * branch that owns the driver would never see them. Callers MUST only pass driver ids they already
+ * resolved through an RLS-scoped query (dispatches/deliveries), which is the authorization check.
+ */
+async function fetchCrossLoadsForDrivers(
+  driverIds: string[],
+  startISO: string,
+  endISO: string,
+): Promise<CrossLoadRow[]> {
+  const unique = Array.from(new Set(driverIds.filter(Boolean)));
+  if (unique.length === 0) return [];
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("cross_branch_loads")
+    .select(
+      "id, created_at, driver_id, notes, branches(name), cross_branch_load_items(product_id, quantity, products(name, unit))",
+    )
+    .in("driver_id", unique)
+    .gte("created_at", startISO)
+    .lt("created_at", endISO)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((r) => ({
+    id: r.id as string,
+    created_at: r.created_at as string,
+    driver_id: r.driver_id as string,
+    notes: (r.notes as string | null) ?? null,
+    from_branch_name: (r.branches?.name as string | null) ?? null,
+    items: ((r.cross_branch_load_items ?? []) as any[]).map((it) => ({
+      product_id: it.product_id as string,
+      quantity: Number(it.quantity ?? 0),
+      name: (it.products?.name as string | null) ?? null,
+      unit: (it.products?.unit as string | null) ?? null,
+    })),
+  }));
+}
+
 export const listRoutesForDispatch = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -404,6 +460,8 @@ async function fetchRouteDayDispatches(
 function allocateTruckReturnsLifo(
   dispatches: RouteDayDispatch[],
   items: { product_id: string; quantity: number }[],
+  /** Extra returnable units per product not backed by a dispatch (cross-branch loads). */
+  extraCapacity: Map<string, number> = new Map(),
 ): Map<string, Map<string, number>> {
   const allocation = new Map<string, Map<string, number>>();
 
@@ -421,7 +479,16 @@ function allocateTruckReturnsLifo(
       if (remaining <= 0) break;
     }
     if (remaining > 0) {
-      throw new Error("La cantidad que quedó excede lo cargado en la ruta.");
+      // Overflow beyond the dispatches is stock received from another branch: park it on the
+      // latest dispatch row so it is persisted (truck_returns is keyed by dispatch + product).
+      const extra = extraCapacity.get(item.product_id) ?? 0;
+      if (remaining > extra || dispatches.length === 0) {
+        throw new Error("La cantidad que quedó excede lo cargado en la ruta.");
+      }
+      const target = dispatches[0].id;
+      if (!allocation.has(target)) allocation.set(target, new Map());
+      const row = allocation.get(target)!;
+      row.set(item.product_id, (row.get(item.product_id) ?? 0) + remaining);
     }
   }
 
@@ -528,6 +595,8 @@ export const getTruckReturnForRouteDay = createServerFn({ method: "POST" })
     }
 
     const dispatchIds = dispatches.map((d) => d.id);
+    const { startISO: crStart, endISO: crEnd } = tzDayRange(dateStr);
+    const crossLoads = await fetchCrossLoadsForDrivers([data.driver_id], crStart, crEnd);
     const { data: returnRows, error: trErr } = await context.supabase
       .from("truck_returns")
       .select("product_id, quantity, notes, products(name, unit)")
@@ -560,6 +629,23 @@ export const getTruckReturnForRouteDay = createServerFn({ method: "POST" })
           if (!p.unit && meta.unit) p.unit = meta.unit;
         }
         p.total_dispatched += meta.quantity;
+      }
+    }
+
+    for (const cl of crossLoads) {
+      for (const it of cl.items) {
+        let p = products.get(it.product_id);
+        if (!p) {
+          p = {
+            product_id: it.product_id,
+            product_name: it.name,
+            unit: it.unit,
+            total_dispatched: 0,
+            total_returned: 0,
+          };
+          products.set(it.product_id, p);
+        }
+        p.total_dispatched += it.quantity;
       }
     }
 
@@ -644,6 +730,17 @@ export const registerTruckReturnForRouteDay = createServerFn({ method: "POST" })
       }
     }
 
+    const { startISO: crStart, endISO: crEnd } = tzDayRange(dateStr);
+    const crossLoads = await fetchCrossLoadsForDrivers([data.driver_id], crStart, crEnd);
+    const crossByProduct = new Map<string, number>();
+    for (const cl of crossLoads) {
+      for (const it of cl.items) {
+        allowedProducts.add(it.product_id);
+        totalsByProduct.set(it.product_id, (totalsByProduct.get(it.product_id) ?? 0) + it.quantity);
+        crossByProduct.set(it.product_id, (crossByProduct.get(it.product_id) ?? 0) + it.quantity);
+      }
+    }
+
     for (const item of data.items) {
       if (!allowedProducts.has(item.product_id)) {
         throw new Error("Solo puedes registrar regreso de productos despachados.");
@@ -654,7 +751,7 @@ export const registerTruckReturnForRouteDay = createServerFn({ method: "POST" })
       }
     }
 
-    const allocation = allocateTruckReturnsLifo(dispatches, data.items);
+    const allocation = allocateTruckReturnsLifo(dispatches, data.items, crossByProduct);
     await persistTruckReturnRows(
       context.supabase,
       context.userId,
@@ -705,20 +802,13 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
     const { data: deliveries, error: delErr } = await delQ;
     if (delErr) throw new Error(delErr.message);
 
-    // Fetch cross-branch loads for the day
-    let clQ = context.supabase
-      .from("cross_branch_loads")
-      .select("driver_id, cross_branch_load_items(product_id, quantity, products(name, unit))")
-      .gte("created_at", startISO)
-      .lt("created_at", endISO);
-    const { data: crossLoads, error: clErr } = await clQ;
-    if (clErr) throw new Error(clErr.message);
-
     type ProductAgg = {
       product_id: string;
       product_name: string | null;
       unit: string | null;
       dispatched: number;
+      /** Part of `dispatched` that came from another branch's cross-branch load. */
+      received_cross: number;
       sold: number;
       customer_returns: number;
       actual_returned: number;
@@ -730,6 +820,7 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       driver_id: string;
       driver_name: string | null;
       products: Map<string, ProductAgg>;
+      cross_loads: CrossLoadRow[];
     };
 
     const groups = new Map<string, Group>();
@@ -738,7 +829,7 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       const k = keyOf(route_id, driver_id);
       let g = groups.get(k);
       if (!g) {
-        g = { key: k, route_id, route_name, driver_id, driver_name: null, products: new Map() };
+        g = { key: k, route_id, route_name, driver_id, driver_name: null, products: new Map(), cross_loads: [] };
         groups.set(k, g);
       } else if (!g.route_name && route_name) {
         g.route_name = route_name;
@@ -753,6 +844,7 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
           product_name: name,
           unit,
           dispatched: 0,
+          received_cross: 0,
           sold: 0,
           customer_returns: 0,
           actual_returned: 0,
@@ -787,21 +879,6 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       p.actual_returned += Number(tr.quantity ?? 0);
     }
 
-    // Add cross-branch loads to dispatched totals
-    // Match by driver_id to the route they were working that day
-    for (const cl of crossLoads ?? []) {
-      const driverId = cl.driver_id as string;
-      // Find the group(s) for this driver from dispatches/deliveries
-      const driverGroups = Array.from(groups.values()).filter((g) => g.driver_id === driverId);
-      if (driverGroups.length === 0) continue;
-      // If driver has multiple routes same day (rare), add to first one
-      const g = driverGroups[0];
-      for (const it of (cl as any).cross_branch_load_items ?? []) {
-        const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
-        p.dispatched += Number(it.quantity ?? 0);
-      }
-    }
-
     for (const del of deliveries ?? []) {
       const g = getGroup(del.route_id as string, del.driver_id as string, null);
       for (const it of (del as any).delivery_items ?? []) {
@@ -811,6 +888,25 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       for (const it of (del as any).delivery_returns ?? []) {
         const p = getProd(g, it.product_id, it.products?.name ?? null, it.products?.unit ?? null);
         p.customer_returns += Number(it.quantity ?? 0);
+      }
+    }
+
+    // Cross-branch loads (product handed to the driver by another branch). Attached only to
+    // drivers that already have a visible group (dispatch/delivery in the caller's scope).
+    const crossLoads = await fetchCrossLoadsForDrivers(
+      Array.from(groups.values()).map((g) => g.driver_id),
+      startISO,
+      endISO,
+    );
+    for (const cl of crossLoads) {
+      // Loads carry no route; if the driver worked several routes the same day, use the first.
+      const g = Array.from(groups.values()).find((x) => x.driver_id === cl.driver_id);
+      if (!g) continue;
+      g.cross_loads.push(cl);
+      for (const it of cl.items) {
+        const p = getProd(g, it.product_id, it.name, it.unit);
+        p.dispatched += it.quantity;
+        p.received_cross += it.quantity;
       }
     }
 
@@ -833,13 +929,14 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
       const totals = products.reduce(
         (acc, p) => ({
           dispatched: acc.dispatched + p.dispatched,
+          received_cross: acc.received_cross + p.received_cross,
           sold: acc.sold + p.sold,
           customer_returns: acc.customer_returns + p.customer_returns,
           actual_returned: acc.actual_returned + p.actual_returned,
           on_truck: acc.on_truck + p.on_truck,
           difference: acc.difference + p.difference,
         }),
-        { dispatched: 0, sold: 0, customer_returns: 0, actual_returned: 0, on_truck: 0, difference: 0 },
+        { dispatched: 0, received_cross: 0, sold: 0, customer_returns: 0, actual_returned: 0, on_truck: 0, difference: 0 },
       );
       return {
         key: g.key,
@@ -849,6 +946,7 @@ export const getTruckReconciliation = createServerFn({ method: "POST" })
         driver_name: g.driver_name,
         products,
         totals,
+        cross_loads: g.cross_loads,
       };
     }).sort((a, b) => (a.route_name ?? "").localeCompare(b.route_name ?? ""));
   });

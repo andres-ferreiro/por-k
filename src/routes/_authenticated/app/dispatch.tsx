@@ -1711,7 +1711,14 @@ function ReconciliationCard({ date }: { date: string }) {
                                     <span className="text-xs text-muted-foreground ml-1">({p.unit})</span>
                                   ) : null}
                                 </td>
-                                <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.dispatched)}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums">
+                                  {fmtQty(p.dispatched)}
+                                  {p.received_cross > 0 && (
+                                    <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                                      incl. {fmtQty(p.received_cross)} de otra sucursal
+                                    </div>
+                                  )}
+                                </td>
                                 <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.sold)}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.customer_returns)}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(p.on_truck)}</td>
@@ -1748,6 +1755,34 @@ function ReconciliationCard({ date }: { date: string }) {
                         </tfoot>
                       </table>
                     </div>
+                    {g.cross_loads.length > 0 && (
+                      <div className="border-t bg-amber-50/60 px-4 py-3 dark:bg-amber-950/20">
+                        <div className="mb-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+                          Producto recibido de otra sucursal
+                        </div>
+                        <ul className="space-y-1.5 text-xs">
+                          {g.cross_loads.map((cl) => (
+                            <li key={cl.id}>
+                              <span className="font-medium">{cl.from_branch_name ?? "Otra sucursal"}</span>
+                              <span className="text-muted-foreground">
+                                {" · "}
+                                {new Date(cl.created_at).toLocaleTimeString("es", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                                {" · "}
+                              </span>
+                              {cl.items
+                                .map((it) => `${fmtQty(it.quantity)} ${it.name ?? it.product_id.slice(0, 8)}`)
+                                .join(", ")}
+                              {cl.notes ? (
+                                <span className="text-muted-foreground"> — {cl.notes}</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </CollapsibleContent>
                 </div>
               </Collapsible>
