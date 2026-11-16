@@ -86,7 +86,7 @@ export function CustomerAccountDialog({ customer, onOpenChange }: Props) {
 
   return (
     <Dialog open={!!customer} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto sm:max-h-[90vh] sm:overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Estado de cuenta</DialogTitle>
           <DialogDescription>{customer?.name}</DialogDescription>
